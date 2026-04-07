@@ -10,4 +10,4 @@
 if {![package vsatisfies [package provide Tcl] 8.6-]} { return }
 
 package ifneeded @PACKAGE_NAME@ @PACKAGE_VERSION@ \
-    [list source [file join $dir @PACKAGE_NAME@-@PACKAGE_VERSION@.tm]]
+    [list source [file join $dir tcl @PACKAGE_NAME@-@PACKAGE_VERSION@.tm]]

@@ -1,0 +1,129 @@
+#-----------------------------------------------------------------------
+# Makefile.in -- tkmcairo
+# Wird durch ./configure zu Makefile generiert
+#-----------------------------------------------------------------------
+
+PKG_SOURCES  = @PKG_SOURCES@
+PKG_OBJECTS  = @PKG_OBJECTS@
+
+# VPATH: .c Dateien in Unterverzeichnissen finden
+VPATH = @srcdir@/src:@srcdir@
+PKG_TCL_SOURCES = @PKG_TCL_SOURCES@
+PKG_HEADERS  = @PKG_HEADERS@
+PKG_LIB_FILE = @PKG_LIB_FILE@
+PKG_DIR      = $(PACKAGE_NAME)$(PACKAGE_VERSION)
+
+PACKAGE_NAME    = @PACKAGE_NAME@
+PACKAGE_VERSION = @PACKAGE_VERSION@
+
+CC          = @CC@
+CLEANFILES  = @CLEANFILES@
+EXEEXT      = @EXEEXT@
+OBJEXT      = @OBJEXT@
+RANLIB      = @RANLIB@
+RANLIB_STUB = @RANLIB_STUB@
+SHLIB_LD    = @SHLIB_LD@
+SHLIB_LD_LIBS = @SHLIB_LD_LIBS@
+SHLIB_SUFFIX = @SHLIB_SUFFIX@
+TCL_BIN_DIR = @TCL_BIN_DIR@
+TCL_SRC_DIR = @TCL_SRC_DIR@
+TCL_VERSION = @TCL_VERSION@
+# Override: make TCLSH=tclsh9.0 test
+TCLSH        = tclsh
+INSTALL     = @INSTALL@
+INSTALL_DATA= @INSTALL_DATA@
+INSTALL_PROGRAM = @INSTALL_PROGRAM@
+INSTALL_SCRIPT = @INSTALL_SCRIPT@
+
+prefix      = @prefix@
+exec_prefix = @exec_prefix@
+libdir      = @libdir@
+includedir  = @includedir@
+datarootdir = @datarootdir@
+datadir     = @datadir@
+mandir      = @mandir@
+
+PACKAGE_DIR = $(DESTDIR)$(libdir)/$(PKG_DIR)
+
+PKG_CFLAGS  = @PKG_CFLAGS@
+
+INCLUDES    = @PKG_INCLUDES@ @TCL_INCLUDES@
+DEFINES     = @DEFS@ -DUSE_TCL_STUBS
+
+# CFLAGS direkt — keine TEA-internen @VARS@ die nicht substituiert werden
+CFLAGS      = -shared -fPIC -O2 \
+              $(INCLUDES) $(DEFINES) $(PKG_CFLAGS)
+
+LDFLAGS     = @PKG_LIBS@ @TCL_STUB_LIB_SPEC@ -lm
+
+# ================================================================
+# Ziele
+# ================================================================
+
+.PHONY: all clean distclean install test binaries libraries
+
+all: binaries libraries
+
+binaries: $(PKG_LIB_FILE)
+
+libraries:
+
+# Compile-Regel: src/*.c -> *.o im Build-Verzeichnis
+%.$(OBJEXT): @srcdir@/src/%.c
+	$(CC) -c $(CFLAGS) $< -o $@
+
+%.$(OBJEXT): %.c
+	$(CC) -c $(CFLAGS) $< -o $@
+
+# Always build as libtkmcairo.so regardless of TEA naming convention
+# Tcl requires: libNAME.so → NAME_Init() = Tkmcairo_Init
+TKMCAIRO_SO = libtkmcairo.so
+
+$(TKMCAIRO_SO): $(PKG_OBJECTS)
+	$(CC) -shared -o $(TKMCAIRO_SO) $(PKG_OBJECTS) $(LDFLAGS)
+	@echo "Built: $(TKMCAIRO_SO)"
+
+# Keep TEA target working too
+$(PKG_LIB_FILE): $(TKMCAIRO_SO)
+	@test -f $(TKMCAIRO_SO) && cp $(TKMCAIRO_SO) $(PKG_LIB_FILE) || true
+
+binaries: $(TKMCAIRO_SO)
+
+# ================================================================
+# Install
+# ================================================================
+
+install: all install-binaries install-libraries
+
+install-binaries:
+	@mkdir -p $(PACKAGE_DIR)
+	$(INSTALL_PROGRAM) $(PKG_LIB_FILE) $(PACKAGE_DIR)/$(PKG_LIB_FILE)
+	$(INSTALL_DATA)    pkgIndex.tcl    $(PACKAGE_DIR)/pkgIndex.tcl
+
+install-libraries:
+	@mkdir -p $(PACKAGE_DIR)
+	@for f in $(PKG_TCL_SOURCES); do \
+	    echo "Installing $$f"; \
+	    $(INSTALL_DATA) $$f $(PACKAGE_DIR)/; \
+	done
+
+# ================================================================
+# Test
+# ================================================================
+
+test: all
+	TKMCAIRO_LIBDIR=. $(TCLSH) tests/test-tkmcairo.tcl
+
+demo: all
+	TKMCAIRO_LIBDIR=. $(TCLSH) demos/demo-tkmcairo.tcl
+
+# ================================================================
+# Clean
+# ================================================================
+
+clean:
+	-rm -f $(TKMCAIRO_SO) $(PKG_LIB_FILE) $(PKG_OBJECTS) $(CLEANFILES)
+
+distclean: clean
+	-rm -f Makefile pkgIndex.tcl config.cache config.log config.status \
+	       src/xdg-shell-client-protocol.h

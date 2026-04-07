@@ -1,0 +1,128 @@
+# Makefile.win -- tkmcairo Windows Build
+#
+# Targets:
+#   mingw-ucrt64   MSYS2 UCRT64   Tcl 8.6  (default)
+#   bawt86         BAWT 3.2       Tcl 8.6  MSVC-built
+#   bawt90         BAWT 3.2       Tcl 9.0  MinGW-built
+#
+# Verwendung:
+#   MSYS2 UCRT64:   make -f Makefile.win
+#   MSYS2 MINGW64:  make -f Makefile.win TARGET=mingw64
+#   BAWT 8.6:       make -f Makefile.win TARGET=bawt86
+#   BAWT 9.0:       make -f Makefile.win TARGET=bawt90
+#
+# Test:
+#   make -f Makefile.win test
+#
+# Clean:
+#   make -f Makefile.win clean
+
+PACKAGE_NAME    = tkmcairo
+PACKAGE_VERSION = 0.1
+TARGET          ?= mingw-ucrt64
+TCLSH           ?= tclsh
+
+# ================================================================
+# Ziel-Konfigurationen
+# ================================================================
+
+ifeq ($(TARGET),mingw-ucrt64)
+# MSYS2 UCRT64 (Standard)
+TCL_INC     = /ucrt64/include/tcl8.6
+CAIRO_INC   = /ucrt64/include/cairo
+TCL_STUB    = -ltclstub86
+CAIRO_LIB   = -lcairo
+TCL_VER     = 8.6
+endif
+
+ifeq ($(TARGET),mingw64)
+# MSYS2 MINGW64
+TCL_INC     = /mingw64/include/tcl8.6
+CAIRO_INC   = /mingw64/include/cairo
+TCL_STUB    = -ltclstub86
+CAIRO_LIB   = -lcairo
+TCL_VER     = 8.6
+endif
+
+ifeq ($(TARGET),mingw-ucrt64-tcl9)
+# MSYS2 UCRT64 + Tcl 9
+# pacman -S mingw-w64-ucrt-x86_64-tcl9
+TCL_INC     = /ucrt64/include/tcl9.0
+CAIRO_INC   = /ucrt64/include/cairo
+TCL_STUB    = -l:libtclstub9.0.a
+CAIRO_LIB   = -lcairo
+TCL_VER     = 9.0
+TCLSH       = tclsh9.0
+endif
+
+ifeq ($(TARGET),bawt86)
+# BAWT 3.2 — Tcl 8.6 (MSVC-gebaut, .lib Stubs)
+BAWT86      ?= C:/Bawt/Bawt86/Windows/x64/Development/opt/Tcl
+BAWT_GCC    ?= C:/Bawt/Bawt86/Tools/gcc14.2.0_x86_64-w64-mingw32/mingw64/bin
+CC          = $(BAWT_GCC)/gcc.exe
+TCL_INC     = $(BAWT86)/include
+CAIRO_INC   = $(BAWT86)/include/cairo
+TCL_STUB    = -L$(BAWT86)/lib -ltclstub86
+CAIRO_LIB   = -L$(BAWT86)/lib -lcairo
+TCL_VER     = 8.6
+endif
+
+ifeq ($(TARGET),bawt90)
+# BAWT 3.2 — Tcl 9.0 (MinGW-gebaut, .a Stubs)
+BAWT90      ?= C:/Bawt/Bawt903/Windows/x64/Development/opt/Tcl
+BAWT_GCC    ?= C:/Bawt/Bawt86/Tools/gcc14.2.0_x86_64-w64-mingw32/mingw64/bin
+CC          = $(BAWT_GCC)/gcc.exe
+TCL_INC     = $(BAWT90)/include
+CAIRO_INC   = $(BAWT90)/include/cairo
+TCL_STUB    = -L$(BAWT90)/lib -l:libtclstub.a
+CAIRO_LIB   = -L$(BAWT90)/lib -lcairo
+TCL_VER     = 9.0
+endif
+
+# ================================================================
+# Compiler
+# ================================================================
+
+CC          ?= gcc
+
+DEFINES     = -DUSE_TCL_STUBS \
+              -DPACKAGE_NAME=\"$(PACKAGE_NAME)\" \
+              -DPACKAGE_VERSION=\"$(PACKAGE_VERSION)\"
+
+CFLAGS      = -shared -O2 -std=c11 \
+              -I$(TCL_INC) \
+              -I$(CAIRO_INC) \
+              $(DEFINES)
+
+LDFLAGS     = $(TCL_STUB) $(CAIRO_LIB) -lm
+
+# Windows: DLL ohne lib-Prefix (Tcl-Konvention: NAME.dll → Name_Init)
+OUT         = tkmcairo.dll
+
+# ================================================================
+# Targets
+# ================================================================
+
+.PHONY: all test demo clean info
+
+all: $(OUT)
+
+$(OUT): src/libtkmcairo.c
+	$(CC) $(CFLAGS) -o $(OUT) src/libtkmcairo.c $(LDFLAGS)
+	@echo "Built: $(OUT)  [TARGET=$(TARGET), Tcl=$(TCL_VER)]"
+
+test: $(OUT)
+	TKMCAIRO_LIBDIR=. $(TCLSH) tests/test-tkmcairo.tcl
+
+demo: $(OUT)
+	TKMCAIRO_LIBDIR=. $(TCLSH) demos/demo-tkmcairo.tcl
+
+clean:
+	-rm -f $(OUT)
+
+info:
+	@echo "TARGET  = $(TARGET)"
+	@echo "TCL_INC = $(TCL_INC)"
+	@echo "CAIRO_INC = $(CAIRO_INC)"
+	@echo "OUT     = $(OUT)"
+	@echo "CC      = $(CC)"

@@ -1,0 +1,13 @@
+# pkgIndex.tcl.in -- wird durch ./configure zu pkgIndex.tcl
+#
+# Release layout (all files in same directory):
+#   pkgIndex.tcl
+#   tkmcairo-@PACKAGE_VERSION@.tm    TclOO wrapper + loader
+#   libtkmcairo.so                   Linux
+#   libtkmcairo.dylib                macOS
+#   tkmcairo.dll                     Windows
+
+if {![package vsatisfies [package provide Tcl] 8.6-]} { return }
+
+package ifneeded @PACKAGE_NAME@ @PACKAGE_VERSION@ \
+    [list source [file join $dir @PACKAGE_NAME@-@PACKAGE_VERSION@.tm]]

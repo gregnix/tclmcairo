@@ -1,0 +1,120 @@
+#-----------------------------------------------------------------------
+# configure.in -- tkmcairo TEA Build-System
+#
+# tkmcairo: Cairo 2D-Grafik für Tcl (kein Tk nötig)
+#
+# Abhängigkeiten:
+#   - Cairo  >= 1.14  (libcairo2-dev)
+#   - Tcl    >= 8.6
+#
+# Verwendung:
+#   autoconf
+#   ./configure --with-tcl=/usr/lib/tcl8.6
+#   make
+#   make install
+#   make test
+#-----------------------------------------------------------------------
+
+AC_INIT([tkmcairo], [0.1])
+
+TEA_INIT([3.9])
+
+AC_CONFIG_AUX_DIR(tclconfig)
+
+#--------------------------------------------------------------------
+# Tcl (kein Tk nötig -- reine C-Extension)
+#--------------------------------------------------------------------
+
+TEA_PATH_TCLCONFIG
+TEA_LOAD_TCLCONFIG
+
+# TCLSH_PROG fuer Makefile verfuegbar machen
+AC_SUBST(TCLSH_PROG)
+
+TEA_PREFIX
+
+TEA_SETUP_COMPILER
+
+#--------------------------------------------------------------------
+# Cairo -- Pflicht-Dependency
+#--------------------------------------------------------------------
+
+#--------------------------------------------------------------------
+# Cairo: erst pkg-config versuchen, dann manuell suchen
+#--------------------------------------------------------------------
+
+AC_MSG_CHECKING([for cairo])
+if pkg-config --exists cairo 2>/dev/null; then
+    CAIRO_CFLAGS=`pkg-config cairo --cflags`
+    CAIRO_LIBS=`pkg-config cairo --libs`
+    cairo_ver=`pkg-config cairo --modversion`
+    AC_MSG_RESULT([yes (pkg-config: $cairo_ver)])
+else
+    # Manuell suchen
+    CAIRO_CFLAGS=""
+    CAIRO_LIBS="-lcairo"
+    AC_MSG_RESULT([trying -lcairo directly])
+fi
+
+# Header prüfen
+ac_save_CFLAGS="$CFLAGS"
+CFLAGS="$CFLAGS $CAIRO_CFLAGS"
+AC_CHECK_HEADER([cairo/cairo.h], [], [
+    AC_MSG_ERROR([cairo/cairo.h not found. Install: apt install libcairo2-dev])
+])
+AC_CHECK_HEADER([cairo/cairo-pdf.h], [], [
+    AC_MSG_ERROR([cairo/cairo-pdf.h not found. Install: apt install libcairo2-dev])
+])
+AC_CHECK_HEADER([cairo/cairo-svg.h], [], [
+    AC_MSG_ERROR([cairo/cairo-svg.h not found. Install: apt install libcairo2-dev])
+])
+CFLAGS="$ac_save_CFLAGS"
+
+TEA_ADD_INCLUDES([$CAIRO_CFLAGS])
+TEA_ADD_LIBS([$CAIRO_LIBS])
+
+#--------------------------------------------------------------------
+# Quellcode
+#--------------------------------------------------------------------
+
+TEA_ADD_SOURCES([src/libtkmcairo.c])
+TEA_ADD_HEADERS([])
+TEA_ADD_INCLUDES([])
+TEA_ADD_LIBS([-lm])
+TEA_ADD_CFLAGS([])
+TEA_ADD_STUB_SOURCES([])
+TEA_ADD_TCL_SOURCES([tcl/tkmcairo-0.1.tm])
+
+#--------------------------------------------------------------------
+# Tcl Public Headers
+#--------------------------------------------------------------------
+
+TEA_PUBLIC_TCL_HEADERS
+
+#--------------------------------------------------------------------
+# Wir haben keine Tk-Abhängigkeit
+#--------------------------------------------------------------------
+
+TEA_PRIVATE_TCL_HEADERS
+
+#--------------------------------------------------------------------
+# Shared Library
+#--------------------------------------------------------------------
+
+TEA_ENABLE_SHARED
+
+#--------------------------------------------------------------------
+# C Standard
+#--------------------------------------------------------------------
+
+# C standard (no AX_CHECK_COMPILE_FLAG needed — gcc/clang always support -std=c11)
+TEA_ADD_CFLAGS([-std=c11 -Wall -Wextra])
+
+#--------------------------------------------------------------------
+# pkgIndex.tcl generieren
+#--------------------------------------------------------------------
+
+TEA_MAKE_LIB
+
+AC_CONFIG_FILES([Makefile pkgIndex.tcl])
+AC_OUTPUT

@@ -971,3 +971,160 @@ puts "     Saved: ${saving}B (${pct}%)"
 
 puts "\nAll demos complete."
 puts "Output files in directory: $outdir"
+
+# ================================================================
+# Demo 13: Plotchart-style — axes outside, data clipped
+# ================================================================
+puts "Demo 13: Plotchart-style chart..."
+
+set f [file join $outdir demo-plotchart.png]
+
+# Chart geometry
+set W 600; set H 400
+set lm 70; set rm 20; set tm 20; set bm 50
+set pw [expr {$W - $lm - $rm}]   ;# plot width
+set ph [expr {$H - $tm - $bm}]   ;# plot height
+
+# Data ranges
+set xmin 0.0; set xmax 10.0
+set ymin -1.2; set ymax 1.2
+
+# Map data -> pixels
+proc px {x} {
+    global lm pw xmin xmax
+    expr {$lm + ($x - $xmin) / ($xmax - $xmin) * $pw}
+}
+proc py {y} {
+    global tm ph ymin ymax H bm
+    expr {$H - $bm - ($y - $ymin) / ($ymax - $ymin) * $ph}
+}
+
+set ctx [tclmcairo::new $W $H]
+$ctx clear 0.97 0.97 0.99
+
+# ---- Plot area background ----
+$ctx rect $lm $tm $pw $ph -fill {1 1 1} -stroke {0.7 0.7 0.7} -width 1
+
+# ---- Grid lines (inside plot area, clipped) ----
+$ctx push
+$ctx clip_rect $lm $tm $pw $ph
+
+$ctx gradient_linear gbg $lm 0 [expr {$lm+$pw}] 0 \
+    {{0 0.95 0.97 1.0 1} {1 0.97 0.97 1.0 1}}
+$ctx rect $lm $tm $pw $ph -fillname gbg
+
+foreach y {-1.0 -0.5 0.0 0.5 1.0} {
+    set ypx [py $y]
+    if {$y == 0.0} {
+        $ctx line $lm $ypx [expr {$lm+$pw}] $ypx \
+            -color {0.5 0.5 0.7} -width 1.5
+    } else {
+        $ctx line $lm $ypx [expr {$lm+$pw}] $ypx \
+            -color {0.8 0.8 0.9} -width 0.8 -dash {4 4}
+    }
+}
+foreach x {2 4 6 8} {
+    set xpx [px $x]
+    $ctx line $xpx $tm $xpx [expr {$tm+$ph}] \
+        -color {0.8 0.8 0.9} -width 0.8 -dash {4 4}
+}
+
+# ---- Data lines (clipped to plot area) ----
+# sin(x)
+set pts {}
+for {set i 0} {$i <= 100} {incr i} {
+    set x [expr {$xmin + $i * ($xmax-$xmin) / 100.0}]
+    set y [expr {sin($x)}]
+    lappend pts [px $x] [py $y]
+}
+set path "M [lindex $pts 0] [lindex $pts 1]"
+for {set i 2} {$i < [llength $pts]} {incr i 2} {
+    append path " L [lindex $pts $i] [lindex $pts [expr {$i+1}]]"
+}
+$ctx path $path -stroke {0.2 0.4 0.9} -width 2.5
+
+# cos(x)
+set pts {}
+for {set i 0} {$i <= 100} {incr i} {
+    set x [expr {$xmin + $i * ($xmax-$xmin) / 100.0}]
+    set y [expr {cos($x)}]
+    lappend pts [px $x] [py $y]
+}
+set path "M [lindex $pts 0] [lindex $pts 1]"
+for {set i 2} {$i < [llength $pts]} {incr i 2} {
+    append path " L [lindex $pts $i] [lindex $pts [expr {$i+1}]]"
+}
+$ctx path $path -stroke {0.9 0.3 0.2} -width 2.5
+
+# sin(x)*cos(x/2) — third curve
+set pts {}
+for {set i 0} {$i <= 100} {incr i} {
+    set x [expr {$xmin + $i * ($xmax-$xmin) / 100.0}]
+    set y [expr {sin($x) * cos($x/2.0)}]
+    lappend pts [px $x] [py $y]
+}
+set path "M [lindex $pts 0] [lindex $pts 1]"
+for {set i 2} {$i < [llength $pts]} {incr i 2} {
+    append path " L [lindex $pts $i] [lindex $pts [expr {$i+1}]]"
+}
+$ctx path $path -stroke {0.2 0.7 0.3} -width 2 -dash {6 3}
+
+$ctx pop   ;# clip released — axes drawn outside from here
+
+# ---- Axes (outside clip, clean) ----
+# X axis
+$ctx line $lm [expr {$H-$bm}] [expr {$lm+$pw}] [expr {$H-$bm}] \
+    -color {0.2 0.2 0.3} -width 1.5
+# Y axis
+$ctx line $lm $tm $lm [expr {$H-$bm}] \
+    -color {0.2 0.2 0.3} -width 1.5
+
+# Tick marks + labels X
+foreach x {0 2 4 6 8 10} {
+    set xpx [px $x]
+    set ypx [expr {$H-$bm}]
+    $ctx line $xpx $ypx $xpx [expr {$ypx+5}] -color {0.3 0.3 0.4} -width 1
+    $ctx text $xpx [expr {$ypx+18}] $x \
+        -font "Sans 11" -color {0.3 0.3 0.4} -anchor center
+}
+
+# Tick marks + labels Y
+foreach y {-1.0 -0.5 0.0 0.5 1.0} {
+    set ypx [py $y]
+    $ctx line [expr {$lm-5}] $ypx $lm $ypx -color {0.3 0.3 0.4} -width 1
+    $ctx text [expr {$lm-10}] $ypx \
+        [format "%.1f" $y] \
+        -font "Sans 11" -color {0.3 0.3 0.4} -anchor e
+}
+
+# Title + axis labels
+$ctx text [expr {$lm + $pw/2}] 12 \
+    "tclmcairo — Plotchart-style (clip_rect + push/pop)" \
+    -font "Sans Bold 13" -color {0.2 0.2 0.4} -anchor center
+
+$ctx text [expr {$lm + $pw/2}] [expr {$H-6}] \
+    "x" -font "Sans Italic 12" -color {0.4 0.4 0.5} -anchor center
+
+$ctx text 14 [expr {$tm + $ph/2}] \
+    "y" -font "Sans Italic 12" -color {0.4 0.4 0.5} -anchor center
+
+# Legend
+set lx [expr {$lm + $pw - 160}]
+set ly [expr {$tm + 12}]
+$ctx rect $lx $ly 155 62 -fill {1 1 1 0.85} -stroke {0.7 0.7 0.8} -width 1 -radius 4
+foreach {label col dash} {
+    "sin(x)"          {0.2 0.4 0.9}  {}
+    "cos(x)"          {0.9 0.3 0.2}  {}
+    "sin(x)·cos(x/2)" {0.2 0.7 0.3}  {6 3}
+} {
+    incr ly 18
+    set args [list -color $col -width 2]
+    if {$dash ne {}} { lappend args -dash $dash }
+    $ctx line [expr {$lx+8}] $ly [expr {$lx+35}] $ly {*}$args
+    $ctx text [expr {$lx+42}] [expr {$ly+4}] $label \
+        -font "Sans 10" -color {0.3 0.3 0.4}
+}
+
+$ctx save $f
+$ctx destroy
+puts "  -> $f"

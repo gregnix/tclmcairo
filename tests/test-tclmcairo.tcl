@@ -995,4 +995,136 @@ test svg-opts-1.5 {-svg_unit invalid -> error} -body {
 } -result 1
 
 # ================================================================
+
+
+# ================================================================
+# Plotchart-style: clip_rect + push/pop + path (line charts)
+# ================================================================
+test plotchart-1.0 {plotchart: clip_rect scopes data to plot area} -body {
+    set ctx [tclmcairo::new 400 300]
+    $ctx clear 1 1 1
+
+    # Draw outside plot area first (should be visible)
+    $ctx circle 5 5 10 -fill {1 0 0}
+
+    # Clip to plot area
+    $ctx push
+    $ctx clip_rect 50 30 300 220
+
+    # This circle is partially outside — only inner part visible
+    $ctx circle 50 30 40 -fill {0.2 0.5 1}
+
+    # Path inside clip
+    $ctx path "M 50 150 L 200 80 L 350 150" -stroke {0.9 0.3 0.2} -width 2
+    $ctx pop   ;# clip released
+
+    # Draw outside again (should be visible)
+    $ctx circle 395 295 10 -fill {0 0.8 0}
+
+    set f [tmpfile png]
+    $ctx save $f
+    $ctx destroy
+    set ok [expr {[file size $f] > 100}]
+    cleanup $f; set ok
+} -result 1
+
+test plotchart-1.1 {plotchart: nested push/pop restores state} -body {
+    set ctx [tclmcairo::new 300 200]
+    $ctx clear 1 1 1
+
+    $ctx push
+    $ctx clip_rect 10 10 280 180
+    $ctx rect 0 0 300 200 -fill {0.9 0.9 1}
+
+    # Nested push/pop
+    $ctx push
+    $ctx transform -translate 50 50
+    $ctx circle 0 0 30 -fill {1 0.5 0}
+    $ctx pop
+
+    # State restored — circle at absolute position
+    $ctx circle 250 150 20 -fill {0.2 0.8 0.4}
+    $ctx pop
+
+    set f [tmpfile png]
+    $ctx save $f
+    $ctx destroy
+    set ok [expr {[file size $f] > 100}]
+    cleanup $f; set ok
+} -result 1
+
+test plotchart-1.2 {plotchart: multiple curves with data mapping} -body {
+    # Simulate data->pixel mapping as in Demo 13
+    set W 300; set H 200
+    set lm 40; set tm 20
+    set pw [expr {$W - $lm - 20}]
+    set ph [expr {$H - $tm - 30}]
+    set xmin 0.0; set xmax 6.28
+    set ymin -1.2; set ymax 1.2
+
+    proc _px {x} {
+        global lm pw xmin xmax
+        expr {$lm + ($x-$xmin)/($xmax-$xmin)*$pw}
+    }
+    proc _py {y} {
+        global tm ph ymin ymax H
+        expr {$H - 30 - ($y-$ymin)/($ymax-$ymin)*$ph}
+    }
+
+    set ctx [tclmcairo::new $W $H]
+    $ctx clear 0.95 0.95 1.0
+
+    $ctx push
+    $ctx clip_rect $lm $tm $pw $ph
+
+    # sin curve
+    set path "M [_px 0] [_py [expr {sin(0)}]]"
+    for {set i 1} {$i <= 50} {incr i} {
+        set x [expr {$xmin + $i*($xmax-$xmin)/50.0}]
+        append path " L [_px $x] [_py [expr {sin($x)}]]"
+    }
+    $ctx path $path -stroke {0.2 0.4 0.9} -width 2
+
+    # cos curve
+    set path "M [_px 0] [_py [expr {cos(0)}]]"
+    for {set i 1} {$i <= 50} {incr i} {
+        set x [expr {$xmin + $i*($xmax-$xmin)/50.0}]
+        append path " L [_px $x] [_py [expr {cos($x)}]]"
+    }
+    $ctx path $path -stroke {0.9 0.3 0.2} -width 2
+
+    $ctx pop   ;# axes drawn outside clip
+
+    # X axis (outside clip)
+    $ctx line $lm [expr {$H-30}] [expr {$lm+$pw}] [expr {$H-30}] \
+        -color {0.2 0.2 0.3} -width 1.5
+    # Y axis
+    $ctx line $lm $tm $lm [expr {$H-30}] \
+        -color {0.2 0.2 0.3} -width 1.5
+
+    set f [tmpfile png]
+    $ctx save $f
+    $ctx destroy
+    set ok [expr {[file size $f] > 200}]
+    cleanup $f
+    rename _px {}; rename _py {}
+    set ok
+} -result 1
+
+test plotchart-1.3 {plotchart: clip_path with triangle mask} -body {
+    set ctx [tclmcairo::new 200 200]
+    $ctx clear 1 1 1
+    $ctx push
+    $ctx clip_path "M 100 10 L 190 190 L 10 190 Z"
+    $ctx gradient_linear g 0 0 200 0 {{0 0.2 0.5 1 1} {1 0.9 0.3 0.1 1}}
+    $ctx rect 0 0 200 200 -fillname g
+    $ctx pop
+    set f [tmpfile png]
+    $ctx save $f
+    $ctx destroy
+    set ok [expr {[file size $f] > 100}]
+    cleanup $f; set ok
+} -result 1
+
+# ================================================================
 cleanupTests

@@ -1,5 +1,5 @@
 @echo off
-REM test-win.bat -- tkmcairo Tests unter Windows/BAWT
+REM test-win.bat -- tclmcairo Tests unter Windows/BAWT
 REM Aufruf: test-win.bat [86|90]
 REM Default: Tcl 8.6
 
@@ -14,8 +14,8 @@ if "%TCL_VER%"=="86" (
 
 set PATH=%TCLBIN%;%PATH%
 
-echo === tkmcairo Tests (Tcl %TCL_VER%) ===
+echo === tclmcairo Tests (Tcl %TCL_VER%) ===
 REM Cairo.dll liegt in MSYS2 mingw64/bin -- PATH erweitern
 set PATH=C:\msys64\mingw64\bin;%PATH%
-set TKMCAIRO_LIBDIR=.
-"%TCLBIN%\tclsh.exe" tests\test-tkmcairo.tcl
+set TCLMCAIRO_LIBDIR=.
+"%TCLBIN%\tclsh.exe" tests\test-tclmcairo.tcl

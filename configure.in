@@ -1,11 +1,12 @@
 #-----------------------------------------------------------------------
-# configure.in -- tkmcairo TEA Build-System
+# configure.in -- tclmcairo TEA Build-System
 #
-# tkmcairo: Cairo 2D-Grafik für Tcl (kein Tk nötig)
+# tclmcairo: Cairo 2D-Grafik für Tcl (kein Tk nötig)
 #
 # Abhängigkeiten:
 #   - Cairo  >= 1.14  (libcairo2-dev)
 #   - Tcl    >= 8.6
+#   - libjpeg (optional, libjpeg-dev / libjpeg-turbo8-dev)
 #
 # Verwendung:
 #   autoconf
@@ -13,9 +14,12 @@
 #   make
 #   make install
 #   make test
+#
+# Ohne JPEG:
+#   ./configure --with-tcl=/usr/lib/tcl8.6 --disable-jpeg
 #-----------------------------------------------------------------------
 
-AC_INIT([tkmcairo], [0.1])
+AC_INIT([tclmcairo], [0.2])
 
 TEA_INIT([3.9])
 
@@ -39,10 +43,6 @@ TEA_SETUP_COMPILER
 # Cairo -- Pflicht-Dependency
 #--------------------------------------------------------------------
 
-#--------------------------------------------------------------------
-# Cairo: erst pkg-config versuchen, dann manuell suchen
-#--------------------------------------------------------------------
-
 AC_MSG_CHECKING([for cairo])
 if pkg-config --exists cairo 2>/dev/null; then
     CAIRO_CFLAGS=`pkg-config cairo --cflags`
@@ -50,13 +50,11 @@ if pkg-config --exists cairo 2>/dev/null; then
     cairo_ver=`pkg-config cairo --modversion`
     AC_MSG_RESULT([yes (pkg-config: $cairo_ver)])
 else
-    # Manuell suchen
     CAIRO_CFLAGS=""
     CAIRO_LIBS="-lcairo"
     AC_MSG_RESULT([trying -lcairo directly])
 fi
 
-# Header prüfen
 ac_save_CFLAGS="$CFLAGS"
 CFLAGS="$CFLAGS $CAIRO_CFLAGS"
 AC_CHECK_HEADER([cairo/cairo.h], [], [
@@ -74,16 +72,48 @@ TEA_ADD_INCLUDES([$CAIRO_CFLAGS])
 TEA_ADD_LIBS([$CAIRO_LIBS])
 
 #--------------------------------------------------------------------
+# JPEG -- optionale Dependency
+#--------------------------------------------------------------------
+
+AC_ARG_ENABLE([jpeg],
+    [AS_HELP_STRING([--disable-jpeg], [disable JPEG support (default: auto)])],
+    [enable_jpeg=$enableval], [enable_jpeg=auto])
+
+if test "$enable_jpeg" != "no"; then
+    AC_CHECK_HEADER([jpeglib.h],
+        [AC_CHECK_LIB([jpeg], [jpeg_CreateDecompress],
+            [
+                AC_MSG_RESULT([JPEG support enabled])
+                TEA_ADD_CFLAGS([-DHAVE_LIBJPEG])
+                TEA_ADD_LIBS([-ljpeg])
+            ],
+            [
+                if test "$enable_jpeg" = "yes"; then
+                    AC_MSG_ERROR([libjpeg not found. Install: apt install libjpeg-dev])
+                else
+                    AC_MSG_RESULT([libjpeg not found, JPEG support disabled])
+                fi
+            ])],
+        [
+            if test "$enable_jpeg" = "yes"; then
+                AC_MSG_ERROR([jpeglib.h not found. Install: apt install libjpeg-dev])
+            else
+                AC_MSG_RESULT([jpeglib.h not found, JPEG support disabled])
+            fi
+        ])
+fi
+
+#--------------------------------------------------------------------
 # Quellcode
 #--------------------------------------------------------------------
 
-TEA_ADD_SOURCES([src/libtkmcairo.c])
+TEA_ADD_SOURCES([src/libtclmcairo.c])
 TEA_ADD_HEADERS([])
 TEA_ADD_INCLUDES([])
 TEA_ADD_LIBS([-lm])
 TEA_ADD_CFLAGS([])
 TEA_ADD_STUB_SOURCES([])
-TEA_ADD_TCL_SOURCES([tcl/tkmcairo-0.1.tm])
+TEA_ADD_TCL_SOURCES([tcl/tclmcairo-0.2.tm])
 
 #--------------------------------------------------------------------
 # Tcl Public Headers
@@ -107,7 +137,6 @@ TEA_ENABLE_SHARED
 # C Standard
 #--------------------------------------------------------------------
 
-# C standard (no AX_CHECK_COMPILE_FLAG needed — gcc/clang always support -std=c11)
 TEA_ADD_CFLAGS([-std=c11 -Wall -Wextra])
 
 #--------------------------------------------------------------------

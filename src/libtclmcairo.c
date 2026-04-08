@@ -1,50 +1,67 @@
 /*
- * libtkmcairo.c
- * tkmcairo -- Cairo 2D graphics library for Tcl
+ * libtclmcairo.c
+ * tclmcairo -- Cairo 2D graphics library for Tcl
  *
- * Version: 0.1
+ * Version: 0.2
  * Lizenz:  BSD
  *
  * No dependency on Tk, X11, or Wayland.
  * Runs in tclsh. Output: PNG, PDF, SVG, PS/EPS.
  *
+ * Thread safety: NOT thread-safe.
+ * All contexts (g_ctx[]) are global state shared across the interpreter.
+ * Use one tclmcairo interpreter per thread, or add external locking.
+ * This matches Tk's threading model — safe for single-threaded Tcl use.
+ *
  * Tcl API:
- *   tkmcairo create width height ?-mode raster|vector? -> handle
- *   tkmcairo destroy handle
- *   tkmcairo clear  handle r g b ?a?
- *   tkmcairo save   handle filename          (.png .pdf .svg .ps .eps)
- *   tkmcairo size   handle                   -> {w h}
- *   tkmcairo todata handle                   -> bytearray ARGB32
+ *   tclmcairo create width height ?-mode raster|vector|pdf|svg|ps|eps? ?-file f?
+ *   tclmcairo destroy handle
+ *   tclmcairo clear  handle r g b ?a?
+ *   tclmcairo save   handle filename          (.png .pdf .svg .ps .eps)
+ *   tclmcairo size   handle                   -> {w h}
+ *   tclmcairo todata handle                   -> bytearray ARGB32
+ *   tclmcairo newpage handle                  (multi-page PDF/PS/SVG)
+ *   tclmcairo finish  handle                  (flush + close file-mode)
  *
- *   tkmcairo rect   handle x y w h opts
- *   tkmcairo line   handle x1 y1 x2 y2 opts
- *   tkmcairo circle handle cx cy r opts
- *   tkmcairo ellipse handle cx cy rx ry opts
- *   tkmcairo arc    handle cx cy r start end opts
- *   tkmcairo poly   handle x1 y1 x2 y2 ... opts
- *   tkmcairo path   handle svgdata opts      (M L C Q A Z)
- *   tkmcairo text   handle x y string opts
+ *   tclmcairo rect   handle x y w h opts
+ *   tclmcairo line   handle x1 y1 x2 y2 opts
+ *   tclmcairo circle handle cx cy r opts
+ *   tclmcairo ellipse handle cx cy rx ry opts
+ *   tclmcairo arc    handle cx cy r start end opts
+ *   tclmcairo poly   handle x1 y1 x2 y2 ... opts
+ *   tclmcairo path   handle svgdata opts      (M L C Q A Z)
+ *   tclmcairo text   handle x y string opts
+ *   tclmcairo text_path handle x y string opts  (text as path -> fill/stroke)
  *
- *   tkmcairo font_measure handle string font -> {width height ascent descent}
- *   tkmcairo transform handle -translate x y | -scale sx sy | -rotate deg | -reset
+ *   tclmcairo image  handle filename x y ?-width w? ?-height h? ?-alpha a?
  *
- *   tkmcairo gradient_linear handle name x1 y1 x2 y2 stops
- *   tkmcairo gradient_radial handle name cx cy r stops
+ *   tclmcairo clip_rect  handle x y w h
+ *   tclmcairo clip_path  handle svgdata
+ *   tclmcairo clip_reset handle
+ *   tclmcairo push       handle              (cairo_save)
+ *   tclmcairo pop        handle              (cairo_restore)
+ *
+ *   tclmcairo font_measure handle string font -> {width height ascent descent}
+ *   tclmcairo transform handle -translate x y | -scale sx sy | -rotate deg | -reset
+ *
+ *   tclmcairo gradient_linear handle name x1 y1 x2 y2 stops
+ *   tclmcairo gradient_radial handle name cx cy r stops
  *   (stops: {{offset r g b a} ...})
  *
  * Options (as key/value pairs after coordinates):
- *   -fill    {r g b ?a?}     Fill color
- *   -stroke  {r g b ?a?}     Stroke color
- *   -width   n               Line width
- *   -dash    {on off ...}    Dash pattern
- *   -font    "Family Bold Italic Size"
- *   -color   {r g b ?a?}     Text color
- *   -alpha   0.0..1.0        Global alpha
- *   -anchor  nw|n|ne|w|center|e|sw|s|se
- *   -radius  r               Corner radius for rect
- *   -fillname gradname       Gradient as fill
- *   -linecap  butt|round|square
- *   -linejoin miter|round|bevel
+ *   -fill      {r g b ?a?}     Fill color
+ *   -stroke    {r g b ?a?}     Stroke color
+ *   -color     {r g b ?a?}     Text color
+ *   -width     n               Line width
+ *   -dash      {on off ...}    Dash pattern
+ *   -font      "Family Bold Italic Size"
+ *   -alpha     0.0..1.0        Global alpha
+ *   -anchor    nw|n|ne|w|center|e|sw|s|se
+ *   -radius    r               Corner radius for rect
+ *   -fillname  gradname        Gradient as fill
+ *   -linecap   butt|round|square
+ *   -linejoin  miter|round|bevel
+ *   -fillrule  winding|evenodd (for path/poly)
  */
 
 #include <tcl.h>
@@ -59,9 +76,23 @@
 #include <math.h>
 #include <ctype.h>
 
+/* Optional JPEG support via libjpeg */
+#ifdef HAVE_LIBJPEG
+#  include <jpeglib.h>
+#  include <setjmp.h>
+#endif
+
+/* File-mode constants */
+#define MODE_RASTER   0
+#define MODE_VECTOR   1   /* recording surface */
+#define MODE_PDF      2
+#define MODE_SVG      3
+#define MODE_PS       4
+#define MODE_EPS      5
+
 /* Tcl_Size Kompatibilitaet: Tcl 8.6 hat kein Tcl_Size (erst ab 8.7/9.0)
  * In Tcl 9.0 ist Tcl_Size = ptrdiff_t (64-bit sauber).
- * Der Shim macht libtkmcairo.c auf 8.6 und 9.0 kompilierbar. */
+ * Der Shim macht libtclmcairo.c auf 8.6 und 9.0 kompilierbar. */
 #if !defined(Tcl_Size)
 #  if defined(TCL_SIZE_MAX)
      /* Tcl 9.0+: Tcl_Size bereits via tcl.h definiert */
@@ -114,13 +145,16 @@ typedef struct {
     int              id;
     int              width;
     int              height;
-    int              vector;        /* 0=raster 1=recording */
+    int              mode;          /* MODE_* constant */
+    int              vector;        /* 0=raster 1=recording/file */
+    cairo_format_t   fmt;           /* CAIRO_FORMAT_ARGB32|RGB24|A8 */
     cairo_surface_t *surface;
     cairo_surface_t *rec;           /* recording surface (vector) */
     cairo_t         *cr;
     unsigned char   *data;          /* raster pixel data */
     Gradient         grads[MAX_GRAD];
     int              ngrads;
+    int              finished;      /* file-mode: already finished */
 } CairoCtx;
 
 static CairoCtx *g_ctx[MAX_CTX] = {0};
@@ -217,6 +251,8 @@ typedef struct {
     double  dash[16]; int ndash;
     int     linecap;   /* 0=butt 1=round 2=square */
     int     linejoin;  /* 0=miter 1=round 2=bevel */
+    int     fillrule;  /* 0=winding 1=evenodd */
+    int     outline;   /* 0=show_text 1=text_path (font-independent SVG) */
 } DrawOpts;
 
 static void opts_defaults(DrawOpts *o) {
@@ -227,7 +263,7 @@ static void opts_defaults(DrawOpts *o) {
     strncpy(o->font, "Sans 14", sizeof(o->font)-1);
     strncpy(o->anchor, "sw", sizeof(o->anchor)-1);
     o->has_fillname=0; o->fillname[0]='\0';
-    o->ndash=0; o->linecap=0; o->linejoin=0;
+    o->ndash=0; o->linecap=0; o->linejoin=0; o->fillrule=0; o->outline=0;
 }
 
 static int parse_opts(Tcl_Interp *interp, int objc,
@@ -306,6 +342,19 @@ static int parse_opts(Tcl_Interp *interp, int objc,
                 }
             }
         }
+        else if (!strcmp(k,"-fillrule")) {
+            const char *s=Tcl_GetString(v);
+            if     (!strcmp(s,"winding")) o->fillrule=0;
+            else if(!strcmp(s,"evenodd")) o->fillrule=1;
+            else {
+                Tcl_AppendResult(interp,"invalid -fillrule: ",s," (winding|evenodd)",NULL);
+                return 0;
+            }
+        }
+        else if (!strcmp(k,"-outline")) {
+            int b; if (Tcl_GetBooleanFromObj(interp,v,&b) != TCL_OK) return 0;
+            o->outline = b;
+        }
         /* Fix: unbekannte Option -> TCL_ERROR */
         else {
             Tcl_AppendResult(interp, "unknown option \"", k, "\"", NULL);
@@ -345,6 +394,8 @@ static void apply_fill(cairo_t *cr, DrawOpts *o, CairoCtx *c) {
 }
 
 static void draw_fill_stroke(cairo_t *cr, DrawOpts *o, CairoCtx *c) {
+    cairo_set_fill_rule(cr, o->fillrule ? CAIRO_FILL_RULE_EVEN_ODD
+                                        : CAIRO_FILL_RULE_WINDING);
     if (o->has_fill || o->has_fillname) {
         apply_fill(cr, o, c);
         if (o->has_stroke) cairo_fill_preserve(cr);
@@ -361,6 +412,19 @@ static void draw_fill_stroke(cairo_t *cr, DrawOpts *o, CairoCtx *c) {
         cairo_set_source_rgb(cr, 1, 1, 1);
         cairo_stroke(cr);
     }
+}
+
+/* ================================================================== */
+/* Cairo status check helper — call after drawing operations          */
+/* Returns TCL_OK or TCL_ERROR with cairo error message.              */
+/* ================================================================== */
+static int check_cairo(Tcl_Interp *interp, cairo_t *cr, const char *where)
+{
+    cairo_status_t st = cairo_status(cr);
+    if (st == CAIRO_STATUS_SUCCESS) return TCL_OK;
+    Tcl_AppendResult(interp, where, ": ",
+        cairo_status_to_string(st), NULL);
+    return TCL_ERROR;
 }
 
 /* Rounded rectangle */
@@ -518,37 +582,148 @@ static void apply_svg_path(cairo_t *cr, const char *d) {
 /* Tcl commands                                                      */
 /* ================================================================== */
 
-/* tkmcairo create width height ?-mode raster|vector? -> id */
+/* tclmcairo create width height ?-mode raster|vector? -> id */
 static int CairoCreateCmd(ClientData cd, Tcl_Interp *interp,
     int objc, Tcl_Obj *const objv[])
 {
     (void)cd;
     if (objc < 4) {
-        Tcl_WrongNumArgs(interp, 2, objv, "width height ?-mode raster|vector?");
+        Tcl_WrongNumArgs(interp, 2, objv,
+            "width height ?-mode raster|vector|pdf|svg|ps|eps?"
+            " ?-file filename? ?-format argb32|rgb24|a8?"
+            " ?-svg_version 1.1|1.2? ?-svg_unit pt|px|mm|cm|in?");
         return TCL_ERROR;
     }
-    int w, h; int vector = 0;
+    int w, h;
     GET_INT(interp, objv[2], w);
     GET_INT(interp, objv[3], h);
-    for (int i = 4; i+1 < objc; i += 2)
-        if (!strcmp(Tcl_GetString(objv[i]), "-mode") &&
-            !strcmp(Tcl_GetString(objv[i+1]), "vector")) vector = 1;
+
+    int mode = MODE_RASTER;
+    const char *filename = NULL;
+    cairo_format_t fmt = CAIRO_FORMAT_ARGB32;
+    int svg_version = -1;   /* -1 = default (SVG 1.2) */
+    int svg_unit   = -1;    /* -1 = default (pt) */
+
+    for (int i = 4; i+1 < objc; i += 2) {
+        const char *k = Tcl_GetString(objv[i]);
+        const char *v = Tcl_GetString(objv[i+1]);
+        if (!strcmp(k, "-mode")) {
+            if      (!strcmp(v,"raster")) mode = MODE_RASTER;
+            else if (!strcmp(v,"vector")) mode = MODE_VECTOR;
+            else if (!strcmp(v,"pdf"))    mode = MODE_PDF;
+            else if (!strcmp(v,"svg"))    mode = MODE_SVG;
+            else if (!strcmp(v,"ps"))     mode = MODE_PS;
+            else if (!strcmp(v,"eps"))    mode = MODE_EPS;
+            else {
+                Tcl_AppendResult(interp,
+                    "invalid -mode: ", v,
+                    " (raster|vector|pdf|svg|ps|eps)", NULL);
+                return TCL_ERROR;
+            }
+        } else if (!strcmp(k, "-file")) {
+            filename = v;
+        } else if (!strcmp(k, "-format")) {
+            if      (!strcmp(v,"argb32")) fmt = CAIRO_FORMAT_ARGB32;
+            else if (!strcmp(v,"rgb24"))  fmt = CAIRO_FORMAT_RGB24;
+            else if (!strcmp(v,"a8"))     fmt = CAIRO_FORMAT_A8;
+            else {
+                Tcl_AppendResult(interp,
+                    "invalid -format: ", v, " (argb32|rgb24|a8)", NULL);
+                return TCL_ERROR;
+            }
+        } else if (!strcmp(k, "-svg_version")) {
+            if      (!strcmp(v,"1.1")) svg_version = CAIRO_SVG_VERSION_1_1;
+            else if (!strcmp(v,"1.2")) svg_version = CAIRO_SVG_VERSION_1_2;
+            else {
+                Tcl_AppendResult(interp,
+                    "invalid -svg_version: ", v, " (1.1|1.2)", NULL);
+                return TCL_ERROR;
+            }
+        } else if (!strcmp(k, "-svg_unit")) {
+            if      (!strcmp(v,"pt"))  svg_unit = CAIRO_SVG_UNIT_PT;
+            else if (!strcmp(v,"px"))  svg_unit = CAIRO_SVG_UNIT_PX;
+            else if (!strcmp(v,"mm"))  svg_unit = CAIRO_SVG_UNIT_MM;
+            else if (!strcmp(v,"cm"))  svg_unit = CAIRO_SVG_UNIT_CM;
+            else if (!strcmp(v,"in"))  svg_unit = CAIRO_SVG_UNIT_IN;
+            else if (!strcmp(v,"em"))  svg_unit = CAIRO_SVG_UNIT_EM;
+            else if (!strcmp(v,"ex"))  svg_unit = CAIRO_SVG_UNIT_EX;
+            else if (!strcmp(v,"pc"))  svg_unit = CAIRO_SVG_UNIT_PC;
+            else {
+                Tcl_AppendResult(interp,
+                    "invalid -svg_unit: ", v,
+                    " (pt|px|mm|cm|in|em|ex|pc)", NULL);
+                return TCL_ERROR;
+            }
+        }
+    }
+
+    /* file modes require -file */
+    if ((mode == MODE_PDF || mode == MODE_SVG ||
+         mode == MODE_PS  || mode == MODE_EPS) && !filename) {
+        Tcl_SetResult(interp, "-mode pdf|svg|ps|eps requires -file filename",
+                      TCL_STATIC);
+        return TCL_ERROR;
+    }
 
     CairoCtx *c = (CairoCtx*)calloc(1, sizeof(CairoCtx));
-    c->id = g_next_id++; c->width = w; c->height = h; c->vector = vector;
-    c->ngrads = 0;
+    c->id = g_next_id++; c->width = w; c->height = h;
+    c->mode = mode; c->ngrads = 0; c->finished = 0;
+    c->fmt  = fmt;
+    c->vector = (mode != MODE_RASTER);
 
-    if (vector) {
+    switch (mode) {
+    case MODE_RASTER:
+        c->surface = cairo_image_surface_create(fmt, w, h);
+        if (cairo_surface_status(c->surface) != CAIRO_STATUS_SUCCESS) {
+            Tcl_AppendResult(interp, "cairo_image_surface_create failed: ",
+                cairo_status_to_string(cairo_surface_status(c->surface)), NULL);
+            free(c); return TCL_ERROR;
+        }
+        c->cr   = cairo_create(c->surface);
+        c->data = cairo_image_surface_get_data(c->surface);
+        c->rec  = NULL;
+        break;
+    case MODE_VECTOR: {
         cairo_rectangle_t ext = {0, 0, (double)w, (double)h};
         c->rec     = cairo_recording_surface_create(CAIRO_CONTENT_COLOR_ALPHA, &ext);
         c->surface = c->rec;
         c->cr      = cairo_create(c->rec);
         c->data    = NULL;
-    } else {
-        c->surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w, h);
+        break;
+    }
+    case MODE_PDF:
+        c->surface = cairo_pdf_surface_create(filename, (double)w, (double)h);
         c->cr      = cairo_create(c->surface);
-        c->data    = cairo_image_surface_get_data(c->surface);
-        c->rec     = NULL;
+        c->rec     = NULL; c->data = NULL;
+        break;
+    case MODE_SVG:
+        c->surface = cairo_svg_surface_create(filename, (double)w, (double)h);
+        if (svg_version >= 0)
+            cairo_svg_surface_restrict_to_version(c->surface,
+                (cairo_svg_version_t)svg_version);
+        if (svg_unit >= 0)
+            cairo_svg_surface_set_document_unit(c->surface,
+                (cairo_svg_unit_t)svg_unit);
+        c->cr  = cairo_create(c->surface);
+        c->rec = NULL; c->data = NULL;
+        break;
+    case MODE_PS:
+    case MODE_EPS:
+        c->surface = cairo_ps_surface_create(filename, (double)w, (double)h);
+        if (mode == MODE_EPS) cairo_ps_surface_set_eps(c->surface, 1);
+        c->cr      = cairo_create(c->surface);
+        c->rec     = NULL; c->data = NULL;
+        break;
+    }
+
+    /* Check cairo_t status after create */
+    if (cairo_status(c->cr) != CAIRO_STATUS_SUCCESS) {
+        Tcl_AppendResult(interp, "cairo_create failed: ",
+            cairo_status_to_string(cairo_status(c->cr)), NULL);
+        cairo_destroy(c->cr);
+        if (c->rec && c->rec != c->surface) cairo_surface_destroy(c->rec);
+        cairo_surface_destroy(c->surface);
+        free(c); return TCL_ERROR;
     }
 
     if (!ctx_store(c)) {
@@ -560,7 +735,7 @@ static int CairoCreateCmd(ClientData cd, Tcl_Interp *interp,
     return TCL_OK;
 }
 
-/* tkmcairo destroy id */
+/* tclmcairo destroy id */
 static int CairoDestroyCmd(ClientData cd, Tcl_Interp *interp,
     int objc, Tcl_Obj *const objv[])
 {
@@ -568,18 +743,27 @@ static int CairoDestroyCmd(ClientData cd, Tcl_Interp *interp,
     if (objc < 3) { Tcl_WrongNumArgs(interp,2,objv,"id"); return TCL_ERROR; }
     int id; GET_INT(interp, objv[2], id);
     CairoCtx *c = ctx_find(id);
-    if (!c) return TCL_OK;
+    if (!c) return TCL_OK;   /* already destroyed — silently ok */
     /* Release gradients */
     for (int i = 0; i < c->ngrads; i++)
         cairo_pattern_destroy(c->grads[i].pattern);
+    c->ngrads = 0;
     cairo_destroy(c->cr);
+    c->cr = NULL;
+    /* file-mode: finish surface if not already done */
+    if (!c->finished &&
+        (c->mode == MODE_PDF || c->mode == MODE_SVG ||
+         c->mode == MODE_PS  || c->mode == MODE_EPS)) {
+        cairo_surface_finish(c->surface);
+    }
     if (c->rec && c->rec != c->surface) cairo_surface_destroy(c->rec);
     cairo_surface_destroy(c->surface);
+    c->surface = NULL; c->rec = NULL;
     ctx_remove(id); free(c);
     return TCL_OK;
 }
 
-/* tkmcairo clear id r g b ?a? */
+/* tclmcairo clear id r g b ?a? */
 static int CairoClearCmd(ClientData cd, Tcl_Interp *interp,
     int objc, Tcl_Obj *const objv[])
 {
@@ -598,7 +782,7 @@ static int CairoClearCmd(ClientData cd, Tcl_Interp *interp,
     return TCL_OK;
 }
 
-/* tkmcairo size id -> {w h} */
+/* tclmcairo size id -> {w h} */
 static int CairoSizeCmd(ClientData cd, Tcl_Interp *interp,
     int objc, Tcl_Obj *const objv[])
 {
@@ -614,7 +798,7 @@ static int CairoSizeCmd(ClientData cd, Tcl_Interp *interp,
     return TCL_OK;
 }
 
-/* tkmcairo todata id -> bytearray ARGB32 */
+/* tclmcairo todata id -> bytearray ARGB32 */
 static int CairoToDataCmd(ClientData cd, Tcl_Interp *interp,
     int objc, Tcl_Obj *const objv[])
 {
@@ -631,7 +815,166 @@ static int CairoToDataCmd(ClientData cd, Tcl_Interp *interp,
     return TCL_OK;
 }
 
-/* tkmcairo save id filename */
+/* ================================================================== */
+/* tclmcairo topng id -> bytearray (PNG-komprimiert)                   */
+/* Schreibt Surface in-memory als PNG; gibt PNG-Bytes zurück.         */
+/* Für Netzwerk, Datenbank, Tk photo -data etc.                       */
+/* ================================================================== */
+
+typedef struct {
+    unsigned char *buf;
+    size_t         len;
+    size_t         cap;
+} PngBuf;
+
+static cairo_status_t png_write_cb(void *closure,
+    const unsigned char *data, unsigned int length)
+{
+    PngBuf *pb = (PngBuf*)closure;
+    if (pb->len + length > pb->cap) {
+        size_t newcap = pb->cap * 2 + length + 4096;
+        unsigned char *nb = (unsigned char*)realloc(pb->buf, newcap);
+        if (!nb) return CAIRO_STATUS_NO_MEMORY;
+        pb->buf = nb; pb->cap = newcap;
+    }
+    memcpy(pb->buf + pb->len, data, length);
+    pb->len += length;
+    return CAIRO_STATUS_SUCCESS;
+}
+
+static int CairoToPngCmd(ClientData cd, Tcl_Interp *interp,
+    int objc, Tcl_Obj *const objv[])
+{
+    (void)cd;
+    if (objc < 3) { Tcl_WrongNumArgs(interp,2,objv,"id"); return TCL_ERROR; }
+    int id; GET_INT(interp, objv[2], id);
+    CairoCtx *c = ctx_find(id);
+    if (!c) { Tcl_SetResult(interp,"invalid id",TCL_STATIC); return TCL_ERROR; }
+
+    cairo_surface_t *surf = c->surface;
+    int free_surf = 0;
+
+    /* vector mode: erst in raster rendern */
+    if (c->vector && c->rec) {
+        surf = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, c->width, c->height);
+        cairo_t *cr2 = cairo_create(surf);
+        cairo_set_source_surface(cr2, c->rec, 0, 0);
+        cairo_paint(cr2);
+        cairo_destroy(cr2);
+        free_surf = 1;
+    }
+
+    cairo_surface_flush(surf);
+
+    PngBuf pb = {0};
+    pb.cap = (size_t)(c->width * c->height * 4 + 4096);
+    pb.buf = (unsigned char*)malloc(pb.cap);
+    if (!pb.buf) {
+        if (free_surf) cairo_surface_destroy(surf);
+        Tcl_SetResult(interp,"out of memory",TCL_STATIC);
+        return TCL_ERROR;
+    }
+
+    cairo_status_t st = cairo_surface_write_to_png_stream(surf, png_write_cb, &pb);
+    if (free_surf) cairo_surface_destroy(surf);
+
+    if (st != CAIRO_STATUS_SUCCESS) {
+        free(pb.buf);
+        Tcl_SetResult(interp,(char*)cairo_status_to_string(st),TCL_VOLATILE);
+        return TCL_ERROR;
+    }
+
+    Tcl_SetObjResult(interp,
+        Tcl_NewByteArrayObj(pb.buf, (Tcl_Size)pb.len));
+    free(pb.buf);
+    return TCL_OK;
+}
+
+/* ================================================================== */
+/* tclmcairo image_data id bytes x y ?-width w? ?-height h? ?-alpha a? */
+/* Lädt PNG aus Bytearray (nicht aus Datei) und zeichnet es.          */
+/* ================================================================== */
+
+typedef struct {
+    const unsigned char *buf;
+    size_t               len;
+    size_t               pos;
+} PngReadBuf;
+
+static cairo_status_t png_read_cb(void *closure,
+    unsigned char *data, unsigned int length)
+{
+    PngReadBuf *rb = (PngReadBuf*)closure;
+    if (rb->pos + length > rb->len) return CAIRO_STATUS_READ_ERROR;
+    memcpy(data, rb->buf + rb->pos, length);
+    rb->pos += length;
+    return CAIRO_STATUS_SUCCESS;
+}
+
+static int CairoImageDataCmd(ClientData cd, Tcl_Interp *interp,
+    int objc, Tcl_Obj *const objv[])
+{
+    (void)cd;
+    if (objc < 6) {
+        Tcl_WrongNumArgs(interp,2,objv,
+            "id bytes x y ?-width w? ?-height h? ?-alpha a?");
+        return TCL_ERROR;
+    }
+    int id; GET_INT(interp, objv[2], id);
+    CairoCtx *c = ctx_find(id);
+    if (!c) { Tcl_SetResult(interp,"invalid id",TCL_STATIC); return TCL_ERROR; }
+
+    Tcl_Size blen;
+    const unsigned char *bdata = Tcl_GetByteArrayFromObj(objv[3], &blen);
+    if (!bdata || blen < 8) {
+        Tcl_SetResult(interp,"image_data: invalid PNG bytes",TCL_STATIC);
+        return TCL_ERROR;
+    }
+
+    double x, y;
+    GET_DOUBLE(interp, objv[4], x);
+    GET_DOUBLE(interp, objv[5], y);
+
+    double dest_w = -1, dest_h = -1, alpha = 1.0;
+    for (int i = 6; i+1 < objc; i += 2) {
+        const char *k = Tcl_GetString(objv[i]);
+        if      (!strcmp(k,"-width"))  { GET_DOUBLE(interp,objv[i+1],dest_w); }
+        else if (!strcmp(k,"-height")) { GET_DOUBLE(interp,objv[i+1],dest_h); }
+        else if (!strcmp(k,"-alpha"))  { GET_DOUBLE(interp,objv[i+1],alpha);  }
+    }
+
+    PngReadBuf rb = { bdata, (size_t)blen, 0 };
+    cairo_surface_t *img = cairo_image_surface_create_from_png_stream(
+        png_read_cb, &rb);
+
+    if (!img || cairo_surface_status(img) != CAIRO_STATUS_SUCCESS) {
+        const char *err = img ?
+            cairo_status_to_string(cairo_surface_status(img)) :
+            "cannot decode PNG data";
+        Tcl_AppendResult(interp, "image_data: ", err, NULL);
+        if (img) cairo_surface_destroy(img);
+        return TCL_ERROR;
+    }
+
+    int iw = cairo_image_surface_get_width(img);
+    int ih = cairo_image_surface_get_height(img);
+
+    cairo_save(c->cr);
+    cairo_translate(c->cr, x, y);
+    if (dest_w > 0 || dest_h > 0) {
+        double sw = (dest_w > 0) ? dest_w/iw : dest_h/ih;
+        double sh = (dest_h > 0) ? dest_h/ih : sw;
+        if (dest_w > 0 && dest_h > 0) { sw = dest_w/iw; sh = dest_h/ih; }
+        cairo_scale(c->cr, sw, sh);
+    }
+    cairo_set_source_surface(c->cr, img, 0, 0);
+    cairo_paint_with_alpha(c->cr, alpha);
+    cairo_restore(c->cr);
+    cairo_surface_destroy(img);
+    return TCL_OK;
+}
+
+/* tclmcairo save id filename */
 static int CairoSaveCmd(ClientData cd, Tcl_Interp *interp,
     int objc, Tcl_Obj *const objv[])
 {
@@ -651,6 +994,10 @@ static int CairoSaveCmd(ClientData cd, Tcl_Interp *interp,
         if (c->vector) {
             cairo_surface_t *img = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w, h);
             cairo_t *cr2 = cairo_create(img);
+            if (check_cairo(interp, cr2, "save png") != TCL_OK) {
+                cairo_destroy(cr2); cairo_surface_destroy(img);
+                return TCL_ERROR;
+            }
             cairo_set_source_surface(cr2, c->rec, 0, 0); cairo_paint(cr2);
             cairo_destroy(cr2); cairo_surface_flush(img);
             st = cairo_surface_write_to_png(img, fname);
@@ -689,7 +1036,374 @@ static int CairoSaveCmd(ClientData cd, Tcl_Interp *interp,
     return TCL_OK;
 }
 
-/* tkmcairo rect id x y w h ?opts? */
+/* ================================================================== */
+/* tclmcairo newpage id  -- cairo_show_page (multi-page PDF/PS/SVG)    */
+/* ================================================================== */
+static int CairoNewPageCmd(ClientData cd, Tcl_Interp *interp,
+    int objc, Tcl_Obj *const objv[])
+{
+    (void)cd;
+    if (objc < 3) { Tcl_WrongNumArgs(interp,2,objv,"id"); return TCL_ERROR; }
+    int id; GET_INT(interp, objv[2], id);
+    CairoCtx *c = ctx_find(id);
+    if (!c) { Tcl_SetResult(interp,"invalid id",TCL_STATIC); return TCL_ERROR; }
+    if (c->mode != MODE_PDF && c->mode != MODE_SVG &&
+        c->mode != MODE_PS  && c->mode != MODE_EPS) {
+        Tcl_SetResult(interp,
+            "newpage only valid for -mode pdf|svg|ps|eps", TCL_STATIC);
+        return TCL_ERROR;
+    }
+    cairo_show_page(c->cr);
+    return TCL_OK;
+}
+
+/* ================================================================== */
+/* tclmcairo finish id  -- flush + close file-mode surface             */
+/* ================================================================== */
+static int CairoFinishCmd(ClientData cd, Tcl_Interp *interp,
+    int objc, Tcl_Obj *const objv[])
+{
+    (void)cd;
+    if (objc < 3) { Tcl_WrongNumArgs(interp,2,objv,"id"); return TCL_ERROR; }
+    int id; GET_INT(interp, objv[2], id);
+    CairoCtx *c = ctx_find(id);
+    if (!c) { Tcl_SetResult(interp,"invalid id",TCL_STATIC); return TCL_ERROR; }
+    if (!c->finished) {
+        cairo_surface_flush(c->surface);
+        if (c->mode == MODE_PDF || c->mode == MODE_SVG ||
+            c->mode == MODE_PS  || c->mode == MODE_EPS) {
+            cairo_surface_finish(c->surface);
+        }
+        c->finished = 1;
+    }
+    return TCL_OK;
+}
+
+/* ================================================================== */
+/* tclmcairo push id  -- cairo_save                                    */
+/* tclmcairo pop  id  -- cairo_restore                                 */
+/* ================================================================== */
+static int CairoPushCmd(ClientData cd, Tcl_Interp *interp,
+    int objc, Tcl_Obj *const objv[])
+{
+    (void)cd;
+    if (objc < 3) { Tcl_WrongNumArgs(interp,2,objv,"id"); return TCL_ERROR; }
+    int id; GET_INT(interp, objv[2], id);
+    CairoCtx *c = ctx_find(id);
+    if (!c) { Tcl_SetResult(interp,"invalid id",TCL_STATIC); return TCL_ERROR; }
+    cairo_save(c->cr);
+    return TCL_OK;
+}
+
+static int CairoPopCmd(ClientData cd, Tcl_Interp *interp,
+    int objc, Tcl_Obj *const objv[])
+{
+    (void)cd;
+    if (objc < 3) { Tcl_WrongNumArgs(interp,2,objv,"id"); return TCL_ERROR; }
+    int id; GET_INT(interp, objv[2], id);
+    CairoCtx *c = ctx_find(id);
+    if (!c) { Tcl_SetResult(interp,"invalid id",TCL_STATIC); return TCL_ERROR; }
+    cairo_restore(c->cr);
+    return TCL_OK;
+}
+
+/* ================================================================== */
+/* tclmcairo clip_rect  id x y w h                                     */
+/* tclmcairo clip_path  id svgdata                                     */
+/* tclmcairo clip_reset id                                             */
+/* ================================================================== */
+static int CairoClipRectCmd(ClientData cd, Tcl_Interp *interp,
+    int objc, Tcl_Obj *const objv[])
+{
+    (void)cd;
+    if (objc < 7) { Tcl_WrongNumArgs(interp,2,objv,"id x y w h"); return TCL_ERROR; }
+    int id; GET_INT(interp, objv[2], id);
+    CairoCtx *c = ctx_find(id);
+    if (!c) { Tcl_SetResult(interp,"invalid id",TCL_STATIC); return TCL_ERROR; }
+    double x,y,w,h;
+    GET_DOUBLE(interp,objv[3],x); GET_DOUBLE(interp,objv[4],y);
+    GET_DOUBLE(interp,objv[5],w); GET_DOUBLE(interp,objv[6],h);
+    cairo_rectangle(c->cr, x, y, w, h);
+    cairo_clip(c->cr);
+    return TCL_OK;
+}
+
+static int CairoClipPathCmd(ClientData cd, Tcl_Interp *interp,
+    int objc, Tcl_Obj *const objv[])
+{
+    (void)cd;
+    if (objc < 4) { Tcl_WrongNumArgs(interp,2,objv,"id svgdata"); return TCL_ERROR; }
+    int id; GET_INT(interp, objv[2], id);
+    CairoCtx *c = ctx_find(id);
+    if (!c) { Tcl_SetResult(interp,"invalid id",TCL_STATIC); return TCL_ERROR; }
+    const char *svgdata = Tcl_GetString(objv[3]);
+    cairo_new_path(c->cr);
+    apply_svg_path(c->cr, svgdata);
+    cairo_clip(c->cr);
+    return TCL_OK;
+}
+
+static int CairoClipResetCmd(ClientData cd, Tcl_Interp *interp,
+    int objc, Tcl_Obj *const objv[])
+{
+    (void)cd;
+    if (objc < 3) { Tcl_WrongNumArgs(interp,2,objv,"id"); return TCL_ERROR; }
+    int id; GET_INT(interp, objv[2], id);
+    CairoCtx *c = ctx_find(id);
+    if (!c) { Tcl_SetResult(interp,"invalid id",TCL_STATIC); return TCL_ERROR; }
+    cairo_reset_clip(c->cr);
+    return TCL_OK;
+}
+
+/* ================================================================== */
+/* tclmcairo image id filename x y ?-width w? ?-height h? ?-alpha a?  */
+/* Loads PNG (always) and JPEG (if HAVE_LIBJPEG).                     */
+/* In PDF/SVG mode: JPEG is embedded as MIME data (no re-encoding).   */
+/* ================================================================== */
+
+#ifdef HAVE_LIBJPEG
+/* Error handler for libjpeg */
+struct JpegErrMgr {
+    struct jpeg_error_mgr pub;
+    jmp_buf setjmp_buf;
+    char msg[256];
+};
+static void jpeg_error_exit(j_common_ptr cinfo) {
+    struct JpegErrMgr *err = (struct JpegErrMgr*)cinfo->err;
+    (*cinfo->err->format_message)(cinfo, err->msg);
+    longjmp(err->setjmp_buf, 1);
+}
+
+static cairo_surface_t *load_jpeg(const char *filename,
+    unsigned char **raw_out, size_t *raw_size_out)
+{
+    FILE *fp = fopen(filename, "rb");
+    if (!fp) return NULL;
+
+    /* Read raw file bytes for MIME embedding */
+    fseek(fp, 0, SEEK_END); long fsz = ftell(fp); rewind(fp);
+    unsigned char *raw = (unsigned char*)malloc((size_t)fsz);
+    if (!raw) { fclose(fp); return NULL; }
+    if ((long)fread(raw, 1, (size_t)fsz, fp) != fsz) {
+        free(raw); fclose(fp); return NULL;
+    }
+    rewind(fp);
+
+    struct jpeg_decompress_struct cinfo;
+    struct JpegErrMgr jerr;
+    cinfo.err = jpeg_std_error(&jerr.pub);
+    jerr.pub.error_exit = jpeg_error_exit;
+    if (setjmp(jerr.setjmp_buf)) {
+        jpeg_destroy_decompress(&cinfo);
+        fclose(fp); free(raw); return NULL;
+    }
+    jpeg_create_decompress(&cinfo);
+    jpeg_stdio_src(&cinfo, fp);
+    jpeg_read_header(&cinfo, TRUE);
+    cinfo.out_color_space = JCS_RGB;
+    jpeg_start_decompress(&cinfo);
+
+    int w = (int)cinfo.output_width;
+    int h = (int)cinfo.output_height;
+    int stride = cairo_format_stride_for_width(CAIRO_FORMAT_RGB24, w);
+    unsigned char *pixels = (unsigned char*)calloc((size_t)(stride * h), 1);
+    if (!pixels) {
+        jpeg_destroy_decompress(&cinfo);
+        fclose(fp); free(raw); return NULL;
+    }
+
+    while ((int)cinfo.output_scanline < h) {
+        unsigned char *row = pixels + cinfo.output_scanline * stride;
+        /* libjpeg gives RGB, Cairo needs BGRA (little-endian ARGB32) */
+        unsigned char *tmp = (unsigned char*)malloc((size_t)(w * 3));
+        if (!tmp) break;
+        unsigned char *rp = tmp;
+        jpeg_read_scanlines(&cinfo, &rp, 1);
+        for (int x = 0; x < w; x++) {
+            row[x*4+0] = tmp[x*3+2]; /* B */
+            row[x*4+1] = tmp[x*3+1]; /* G */
+            row[x*4+2] = tmp[x*3+0]; /* R */
+            row[x*4+3] = 0xFF;       /* A */
+        }
+        free(tmp);
+    }
+    jpeg_finish_decompress(&cinfo);
+    jpeg_destroy_decompress(&cinfo);
+    fclose(fp);
+
+    cairo_surface_t *surf = cairo_image_surface_create_for_data(
+        pixels, CAIRO_FORMAT_ARGB32, w, h, stride);
+    /* Attach raw JPEG for PDF/SVG MIME embedding (no re-encoding) */
+    cairo_surface_set_mime_data(surf, CAIRO_MIME_TYPE_JPEG,
+        raw, (unsigned long)fsz,
+        free,  /* destroy callback */
+        raw);
+    /* pixels: must survive surface; attach via user data */
+    static cairo_user_data_key_t px_key;
+    cairo_surface_set_user_data(surf, &px_key, pixels,
+        (cairo_destroy_func_t)free);
+
+    if (raw_out)      *raw_out      = raw;
+    if (raw_size_out) *raw_size_out = (size_t)fsz;
+    return surf;
+}
+#endif /* HAVE_LIBJPEG */
+
+static int CairoImageCmd(ClientData cd, Tcl_Interp *interp,
+    int objc, Tcl_Obj *const objv[])
+{
+    (void)cd;
+    if (objc < 6) {
+        Tcl_WrongNumArgs(interp,2,objv,
+            "id filename x y ?-width w? ?-height h? ?-alpha a?");
+        return TCL_ERROR;
+    }
+    int id; GET_INT(interp, objv[2], id);
+    CairoCtx *c = ctx_find(id);
+    if (!c) { Tcl_SetResult(interp,"invalid id",TCL_STATIC); return TCL_ERROR; }
+
+    const char *fname = Tcl_GetString(objv[3]);
+    double x, y;
+    GET_DOUBLE(interp, objv[4], x);
+    GET_DOUBLE(interp, objv[5], y);
+
+    double dest_w = -1, dest_h = -1, alpha = 1.0;
+    for (int i = 6; i+1 < objc; i += 2) {
+        const char *k = Tcl_GetString(objv[i]);
+        if      (!strcmp(k,"-width"))  { GET_DOUBLE(interp,objv[i+1],dest_w); }
+        else if (!strcmp(k,"-height")) { GET_DOUBLE(interp,objv[i+1],dest_h); }
+        else if (!strcmp(k,"-alpha"))  { GET_DOUBLE(interp,objv[i+1],alpha);  }
+    }
+
+    /* Load image surface.
+     * JPEG: load_jpeg() automatically attaches CAIRO_MIME_TYPE_JPEG —
+     *       Cairo PDF/SVG backends embed the original JPEG bytes 1:1,
+     *       no re-encoding, no quality loss.
+     * PNG:  cairo_image_surface_create_from_png() — Cairo re-encodes
+     *       as pixel data in PDF/SVG (CAIRO_MIME_TYPE_PNG is not
+     *       honored by current Cairo PDF/SVG backends). */
+    cairo_surface_t *img = NULL;
+#ifdef HAVE_LIBJPEG
+    const char *dot = strrchr(fname, '.');
+    const char *ext = dot ? dot+1 : "";
+    if (!strcasecmp(ext,"jpg") || !strcasecmp(ext,"jpeg")) {
+        img = load_jpeg(fname, NULL, NULL);
+    }
+#endif
+    if (!img) {
+        img = cairo_image_surface_create_from_png(fname);
+    }
+
+    if (!img || cairo_surface_status(img) != CAIRO_STATUS_SUCCESS) {
+        const char *err = img ?
+            cairo_status_to_string(cairo_surface_status(img)) :
+            "cannot load image";
+        Tcl_AppendResult(interp, "image load failed (", fname, "): ", err, NULL);
+        if (img) cairo_surface_destroy(img);
+        return TCL_ERROR;
+    }
+
+    int iw = cairo_image_surface_get_width(img);
+    int ih = cairo_image_surface_get_height(img);
+
+    cairo_save(c->cr);
+    cairo_translate(c->cr, x, y);
+
+    if (dest_w > 0 || dest_h > 0) {
+        double sw = (dest_w > 0) ? dest_w / iw : (dest_h / ih);
+        double sh = (dest_h > 0) ? dest_h / ih : sw;
+        if (dest_w > 0 && dest_h > 0) { sw = dest_w/iw; sh = dest_h/ih; }
+        cairo_scale(c->cr, sw, sh);
+    }
+
+    cairo_set_source_surface(c->cr, img, 0, 0);
+    cairo_paint_with_alpha(c->cr, alpha);
+    cairo_restore(c->cr);
+    cairo_surface_destroy(img);
+    return TCL_OK;
+}
+
+/* ================================================================== */
+/* tclmcairo blit dst_id src_id x y ?-alpha a? ?-width w? ?-height h? */
+/* Composites src context onto dst context at (x,y).                  */
+/* Both raster and vector sources supported.                          */
+/* ================================================================== */
+static int CairoBlitCmd(ClientData cd, Tcl_Interp *interp,
+    int objc, Tcl_Obj *const objv[])
+{
+    (void)cd;
+    if (objc < 6) {
+        Tcl_WrongNumArgs(interp,2,objv,"dst_id src_id x y ?-alpha a? ?-width w? ?-height h?");
+        return TCL_ERROR;
+    }
+    int dst_id, src_id;
+    GET_INT(interp, objv[2], dst_id);
+    GET_INT(interp, objv[3], src_id);
+    CairoCtx *dst = ctx_find(dst_id);
+    CairoCtx *src = ctx_find(src_id);
+    if (!dst) { Tcl_SetResult(interp,"invalid dst_id",TCL_STATIC); return TCL_ERROR; }
+    if (!src) { Tcl_SetResult(interp,"invalid src_id",TCL_STATIC); return TCL_ERROR; }
+    if (dst_id == src_id) {
+        Tcl_SetResult(interp,"blit: dst and src must be different contexts",TCL_STATIC);
+        return TCL_ERROR;
+    }
+
+    double x, y;
+    GET_DOUBLE(interp, objv[4], x);
+    GET_DOUBLE(interp, objv[5], y);
+
+    double alpha = 1.0, dest_w = -1, dest_h = -1;
+    for (int i = 6; i+1 < objc; i += 2) {
+        const char *k = Tcl_GetString(objv[i]);
+        if      (!strcmp(k,"-alpha"))  { GET_DOUBLE(interp,objv[i+1],alpha);  }
+        else if (!strcmp(k,"-width"))  { GET_DOUBLE(interp,objv[i+1],dest_w); }
+        else if (!strcmp(k,"-height")) { GET_DOUBLE(interp,objv[i+1],dest_h); }
+    }
+
+    /* Für vector source: zuerst in Raster rendern */
+    cairo_surface_t *src_surf = NULL;
+    int free_src = 0;
+
+    if (src->vector && src->rec) {
+        /* Recording surface → temp raster für blit */
+        cairo_surface_t *tmp = cairo_image_surface_create(
+            CAIRO_FORMAT_ARGB32, src->width, src->height);
+        cairo_t *cr2 = cairo_create(tmp);
+        cairo_set_source_surface(cr2, src->rec, 0, 0);
+        cairo_paint(cr2);
+        cairo_destroy(cr2);
+        src_surf = tmp;
+        free_src = 1;
+    } else if (!src->vector) {
+        cairo_surface_flush(src->surface);
+        src_surf = src->surface;
+    } else {
+        /* file-mode vector: nicht direkt blittbar */
+        Tcl_SetResult(interp,
+            "blit: src in file-mode (pdf|svg|ps|eps) not supported",
+            TCL_STATIC);
+        return TCL_ERROR;
+    }
+
+    cairo_save(dst->cr);
+    cairo_translate(dst->cr, x, y);
+
+    if (dest_w > 0 || dest_h > 0) {
+        double sw = (dest_w > 0) ? dest_w / src->width  : (dest_h / src->height);
+        double sh = (dest_h > 0) ? dest_h / src->height : sw;
+        if (dest_w > 0 && dest_h > 0) { sw = dest_w/src->width; sh = dest_h/src->height; }
+        cairo_scale(dst->cr, sw, sh);
+    }
+
+    cairo_set_source_surface(dst->cr, src_surf, 0, 0);
+    cairo_paint_with_alpha(dst->cr, alpha);
+    cairo_restore(dst->cr);
+
+    if (free_src) cairo_surface_destroy(src_surf);
+    return TCL_OK;
+}
+
+/* tclmcairo rect id x y w h ?opts? */
 static int CairoRectCmd(ClientData cd, Tcl_Interp *interp,
     int objc, Tcl_Obj *const objv[])
 {
@@ -707,7 +1421,7 @@ static int CairoRectCmd(ClientData cd, Tcl_Interp *interp,
     return TCL_OK;
 }
 
-/* tkmcairo line id x1 y1 x2 y2 ?opts? */
+/* tclmcairo line id x1 y1 x2 y2 ?opts? */
 static int CairoLineCmd(ClientData cd, Tcl_Interp *interp,
     int objc, Tcl_Obj *const objv[])
 {
@@ -730,7 +1444,7 @@ static int CairoLineCmd(ClientData cd, Tcl_Interp *interp,
     return TCL_OK;
 }
 
-/* tkmcairo circle id cx cy r ?opts? */
+/* tclmcairo circle id cx cy r ?opts? */
 static int CairoCircleCmd(ClientData cd, Tcl_Interp *interp,
     int objc, Tcl_Obj *const objv[])
 {
@@ -748,7 +1462,7 @@ static int CairoCircleCmd(ClientData cd, Tcl_Interp *interp,
     return TCL_OK;
 }
 
-/* tkmcairo ellipse id cx cy rx ry ?opts? */
+/* tclmcairo ellipse id cx cy rx ry ?opts? */
 static int CairoEllipseCmd(ClientData cd, Tcl_Interp *interp,
     int objc, Tcl_Obj *const objv[])
 {
@@ -769,7 +1483,7 @@ static int CairoEllipseCmd(ClientData cd, Tcl_Interp *interp,
     return TCL_OK;
 }
 
-/* tkmcairo arc id cx cy r start_deg end_deg ?opts? */
+/* tclmcairo arc id cx cy r start_deg end_deg ?opts? */
 static int CairoArcCmd(ClientData cd, Tcl_Interp *interp,
     int objc, Tcl_Obj *const objv[])
 {
@@ -788,7 +1502,7 @@ static int CairoArcCmd(ClientData cd, Tcl_Interp *interp,
     return TCL_OK;
 }
 
-/* tkmcairo poly id x1 y1 x2 y2 ... ?opts? */
+/* tclmcairo poly id x1 y1 x2 y2 ... ?opts? */
 static int CairoPolyCmd(ClientData cd, Tcl_Interp *interp,
     int objc, Tcl_Obj *const objv[])
 {
@@ -824,7 +1538,7 @@ static int CairoPolyCmd(ClientData cd, Tcl_Interp *interp,
     return TCL_OK;
 }
 
-/* tkmcairo path id svgdata ?opts? */
+/* tclmcairo path id svgdata ?opts? */
 static int CairoPathCmd(ClientData cd, Tcl_Interp *interp,
     int objc, Tcl_Obj *const objv[])
 {
@@ -840,7 +1554,7 @@ static int CairoPathCmd(ClientData cd, Tcl_Interp *interp,
     return TCL_OK;
 }
 
-/* tkmcairo text id x y string ?opts? */
+/* tclmcairo text id x y string ?opts? */
 static int CairoTextCmd(ClientData cd, Tcl_Interp *interp,
     int objc, Tcl_Obj *const objv[])
 {
@@ -879,15 +1593,75 @@ static int CairoTextCmd(ClientData cd, Tcl_Interp *interp,
 
     double r = o.has_color?o.color_r:1, g2=o.has_color?o.color_g:1,
            b  = o.has_color?o.color_b:1;
-    /* Fix: color_a aus -color verwenden (nicht global alpha) */
     double ca = o.has_color?o.color_a:1.0;
-    cairo_set_source_rgba(c->cr, r, g2, b, ca * o.alpha);
     cairo_move_to(c->cr, tx, ty);
-    cairo_show_text(c->cr, text);
+
+    if (o.outline) {
+        /* -outline 1: text_path statt show_text
+         * → font-unabhängiges SVG, fill/stroke/gradient möglich */
+        cairo_text_path(c->cr, text);
+        if (!o.has_fill && !o.has_fillname && !o.has_stroke) {
+            /* Fallback: Farbe aus -color */
+            o.has_fill = 1;
+            o.fill_r = r; o.fill_g = g2; o.fill_b = b; o.fill_a = ca;
+        }
+        draw_fill_stroke(c->cr, &o, c);
+    } else {
+        /* Standard: cairo_show_text → SVG <text> Element */
+        cairo_set_source_rgba(c->cr, r, g2, b, ca * o.alpha);
+        cairo_show_text(c->cr, text);
+    }
     return TCL_OK;
 }
 
-/* tkmcairo font_measure id string font -> {width height ascent descent} */
+/* ================================================================== */
+/* tclmcairo text_path id x y string ?opts?                            */
+/* Text als Pfad: ermöglicht -fill, -stroke, -fillname (Gradient)    */
+/* ================================================================== */
+static int CairoTextPathCmd(ClientData cd, Tcl_Interp *interp,
+    int objc, Tcl_Obj *const objv[])
+{
+    (void)cd;
+    if (objc < 6) { Tcl_WrongNumArgs(interp,2,objv,"id x y string ?opts?"); return TCL_ERROR; }
+    int id; GET_INT(interp, objv[2], id);
+    CairoCtx *c = ctx_find(id);
+    if (!c) { Tcl_SetResult(interp,"invalid id",TCL_STATIC); return TCL_ERROR; }
+    double x,y;
+    GET_DOUBLE(interp,objv[3],x); GET_DOUBLE(interp,objv[4],y);
+    const char *text = Tcl_GetString(objv[5]);
+    DrawOpts o; if (!parse_opts(interp,objc,objv,6,&o)) return TCL_ERROR;
+
+    char family[64]="Sans"; double sz; cairo_font_weight_t wt; cairo_font_slant_t sl;
+    parse_font(o.font, family, sizeof(family), &wt, &sl, &sz);
+    cairo_select_font_face(c->cr, family, sl, wt);
+    cairo_set_font_size(c->cr, sz);
+
+    /* Anchor-Berechnung wie CairoTextCmd */
+    cairo_text_extents_t ext; cairo_font_extents_t fext;
+    cairo_text_extents(c->cr, text, &ext);
+    cairo_font_extents(c->cr, &fext);
+    double tx=x, ty=y;
+    const char *a = o.anchor;
+    if (!strcmp(a,"center")||!strcmp(a,"n")||!strcmp(a,"s"))
+        tx = x - ext.width/2.0 - ext.x_bearing;
+    else if (!strcmp(a,"e")||!strcmp(a,"ne")||!strcmp(a,"se"))
+        tx = x - ext.width - ext.x_bearing;
+    if (!strcmp(a,"nw")||!strcmp(a,"n")||!strcmp(a,"ne"))
+        ty = y + fext.ascent;
+    else if (!strcmp(a,"center")||!strcmp(a,"w")||!strcmp(a,"e"))
+        ty = y + fext.ascent/2.0;
+
+    cairo_move_to(c->cr, tx, ty);
+    cairo_text_path(c->cr, text);   /* Text als Pfad statt show_text */
+
+    /* Standard: weißer Fill wenn keine Option angegeben */
+    if (!o.has_fill && !o.has_fillname && !o.has_stroke) {
+        o.has_fill = 1;
+        o.fill_r = o.fill_g = o.fill_b = 1.0; o.fill_a = 1.0;
+    }
+    draw_fill_stroke(c->cr, &o, c);
+    return TCL_OK;
+}
 static int CairoFontMeasureCmd(ClientData cd, Tcl_Interp *interp,
     int objc, Tcl_Obj *const objv[])
 {
@@ -913,7 +1687,7 @@ static int CairoFontMeasureCmd(ClientData cd, Tcl_Interp *interp,
     return TCL_OK;
 }
 
-/* tkmcairo transform id -translate x y | -scale sx sy | -rotate deg | -reset */
+/* tclmcairo transform id -translate x y | -scale sx sy | -rotate deg | -reset */
 static int CairoTransformCmd(ClientData cd, Tcl_Interp *interp,
     int objc, Tcl_Obj *const objv[])
 {
@@ -941,8 +1715,8 @@ static int CairoTransformCmd(ClientData cd, Tcl_Interp *interp,
     return TCL_OK;
 }
 
-/* tkmcairo gradient_linear id name x1 y1 x2 y2 stops
- * tkmcairo gradient_radial  id name cx cy r stops
+/* tclmcairo gradient_linear id name x1 y1 x2 y2 stops
+ * tclmcairo gradient_radial  id name cx cy r stops
  * stops: {{offset r g b a} ...} */
 static int CairoGradientCmd(ClientData cd, Tcl_Interp *interp,
     int objc, Tcl_Obj *const objv[], int radial)
@@ -1035,8 +1809,9 @@ static int TkmCairoCmd(ClientData cd, Tcl_Interp *interp,
 {
     if (objc < 2) {
         Tcl_WrongNumArgs(interp, 1, objv,
-            "create|destroy|clear|save|size|todata|"
-            "rect|line|circle|ellipse|arc|poly|path|text|"
+            "create|destroy|clear|save|size|todata|newpage|finish|"
+            "push|pop|clip_rect|clip_path|clip_reset|"
+            "image|rect|line|circle|ellipse|arc|poly|path|text|text_path|"
             "font_measure|transform|gradient_linear|gradient_radial ...");
         return TCL_ERROR;
     }
@@ -1047,7 +1822,18 @@ static int TkmCairoCmd(ClientData cd, Tcl_Interp *interp,
     else if (!strcmp(sub,"clear"))            return CairoClearCmd(cd,interp,objc,objv);
     else if (!strcmp(sub,"size"))             return CairoSizeCmd(cd,interp,objc,objv);
     else if (!strcmp(sub,"todata"))           return CairoToDataCmd(cd,interp,objc,objv);
+    else if (!strcmp(sub,"topng"))            return CairoToPngCmd(cd,interp,objc,objv);
+    else if (!strcmp(sub,"image_data"))       return CairoImageDataCmd(cd,interp,objc,objv);
     else if (!strcmp(sub,"save"))             return CairoSaveCmd(cd,interp,objc,objv);
+    else if (!strcmp(sub,"newpage"))          return CairoNewPageCmd(cd,interp,objc,objv);
+    else if (!strcmp(sub,"finish"))           return CairoFinishCmd(cd,interp,objc,objv);
+    else if (!strcmp(sub,"push"))             return CairoPushCmd(cd,interp,objc,objv);
+    else if (!strcmp(sub,"pop"))              return CairoPopCmd(cd,interp,objc,objv);
+    else if (!strcmp(sub,"clip_rect"))        return CairoClipRectCmd(cd,interp,objc,objv);
+    else if (!strcmp(sub,"clip_path"))        return CairoClipPathCmd(cd,interp,objc,objv);
+    else if (!strcmp(sub,"clip_reset"))       return CairoClipResetCmd(cd,interp,objc,objv);
+    else if (!strcmp(sub,"image"))            return CairoImageCmd(cd,interp,objc,objv);
+    else if (!strcmp(sub,"blit"))             return CairoBlitCmd(cd,interp,objc,objv);
     else if (!strcmp(sub,"rect"))             return CairoRectCmd(cd,interp,objc,objv);
     else if (!strcmp(sub,"line"))             return CairoLineCmd(cd,interp,objc,objv);
     else if (!strcmp(sub,"circle"))           return CairoCircleCmd(cd,interp,objc,objv);
@@ -1056,6 +1842,7 @@ static int TkmCairoCmd(ClientData cd, Tcl_Interp *interp,
     else if (!strcmp(sub,"poly"))             return CairoPolyCmd(cd,interp,objc,objv);
     else if (!strcmp(sub,"path"))             return CairoPathCmd(cd,interp,objc,objv);
     else if (!strcmp(sub,"text"))             return CairoTextCmd(cd,interp,objc,objv);
+    else if (!strcmp(sub,"text_path"))        return CairoTextPathCmd(cd,interp,objc,objv);
     else if (!strcmp(sub,"font_measure"))     return CairoFontMeasureCmd(cd,interp,objc,objv);
     else if (!strcmp(sub,"transform"))        return CairoTransformCmd(cd,interp,objc,objv);
     else if (!strcmp(sub,"gradient_linear"))  return CairoGradientCmd(cd,interp,objc,objv,0);
@@ -1071,18 +1858,40 @@ static int TkmCairoCmd(ClientData cd, Tcl_Interp *interp,
 /* Package init                                                        */
 /* ================================================================== */
 
-int Tkmcairo_Init(Tcl_Interp *interp)
+/* Cleanup all contexts on interpreter deletion (Tcl_CallWhenDeleted) */
+static void TclmcairoInterpCleanup(ClientData cd, Tcl_Interp *interp)
+{
+    (void)cd; (void)interp;
+    for (int i = 0; i < MAX_CTX; i++) {
+        if (!g_ctx[i]) continue;
+        CairoCtx *c = g_ctx[i];
+        for (int j = 0; j < c->ngrads; j++)
+            cairo_pattern_destroy(c->grads[j].pattern);
+        if (c->cr) cairo_destroy(c->cr);
+        if (!c->finished &&
+            (c->mode == MODE_PDF || c->mode == MODE_SVG ||
+             c->mode == MODE_PS  || c->mode == MODE_EPS)) {
+            if (c->surface) cairo_surface_finish(c->surface);
+        }
+        if (c->rec && c->rec != c->surface) cairo_surface_destroy(c->rec);
+        if (c->surface) cairo_surface_destroy(c->surface);
+        free(c);
+        g_ctx[i] = NULL;
+    }
+}
+
+int Tclmcairo_Init(Tcl_Interp *interp)
 {
 #ifdef USE_TCL_STUBS
-    /* Tcl 9.x changed major version — "8.6" does not satisfy "9.0"
-     * Solution: try 9.0 first, fall back to 8.6 */
 #if TCL_MAJOR_VERSION >= 9
     if (Tcl_InitStubs(interp, "9.0", 0) == NULL) return TCL_ERROR;
 #else
     if (Tcl_InitStubs(interp, "8.6", 0) == NULL) return TCL_ERROR;
 #endif
 #endif
-    Tcl_CreateObjCommand(interp, "tkmcairo", TkmCairoCmd, NULL, NULL);
-    Tcl_PkgProvide(interp, "tkmcairo", "0.1");
+    Tcl_CreateObjCommand(interp, "tclmcairo", TkmCairoCmd, NULL, NULL);
+    /* Register cleanup callback — frees all contexts on interp deletion */
+    Tcl_CallWhenDeleted(interp, TclmcairoInterpCleanup, NULL);
+    Tcl_PkgProvide(interp, "tclmcairo", "0.2");
     return TCL_OK;
 }

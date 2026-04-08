@@ -1,7 +1,9 @@
-# Makefile.win -- tkmcairo Windows Build
+# Makefile.win -- tclmcairo Windows Build
 #
 # Targets:
 #   mingw-ucrt64   MSYS2 UCRT64   Tcl 8.6  (default)
+#   mingw64        MSYS2 MINGW64  Tcl 8.6
+#   mingw-ucrt64-tcl9  MSYS2 UCRT64 Tcl 9.0
 #   bawt86         BAWT 3.2       Tcl 8.6  MSVC-built
 #   bawt90         BAWT 3.2       Tcl 9.0  MinGW-built
 #
@@ -11,16 +13,54 @@
 #   BAWT 8.6:       make -f Makefile.win TARGET=bawt86
 #   BAWT 9.0:       make -f Makefile.win TARGET=bawt90
 #
+# JPEG (default ein):
+#   make -f Makefile.win           # mit JPEG
+#   make -f Makefile.win JPEG=0    # ohne JPEG
+#
 # Test:
 #   make -f Makefile.win test
 #
 # Clean:
 #   make -f Makefile.win clean
 
-PACKAGE_NAME    = tkmcairo
-PACKAGE_VERSION = 0.1
+PACKAGE_NAME    = tclmcairo
+PACKAGE_VERSION = 0.2
 TARGET          ?= mingw-ucrt64
 TCLSH           ?= tclsh
+
+# ================================================================
+# Optional JPEG support
+# MSYS2: pacman -S mingw-w64-x86_64-libjpeg-turbo
+#        pacman -S mingw-w64-ucrt-x86_64-libjpeg-turbo
+# BAWT:  Cairo-Paket enthaelt meist kein libjpeg -> JPEG=0
+# ================================================================
+# JPEG: auto-detect wenn JPEG=1 (default)
+# Prüft ob jpeglib.h vorhanden — deaktiviert automatisch wenn nicht
+# ================================================================
+JPEG            ?= 1
+ifeq ($(JPEG),1)
+  # MSYS2 MINGW64
+  ifneq ($(wildcard /mingw64/include/jpeglib.h),)
+    JPEG_DEFINE = -DHAVE_LIBJPEG
+    JPEG_LIB    = -ljpeg
+    JPEG_INC    = -I/mingw64/include
+  # MSYS2 UCRT64
+  else ifneq ($(wildcard /ucrt64/include/jpeglib.h),)
+    JPEG_DEFINE = -DHAVE_LIBJPEG
+    JPEG_LIB    = -ljpeg
+    JPEG_INC    = -I/ucrt64/include
+  else
+    JPEG_DEFINE =
+    JPEG_LIB    =
+    JPEG_INC    =
+    $(info JPEG: disabled (jpeglib.h not found))
+    $(info JPEG: run: pacman -S mingw-w64-x86_64-libjpeg-turbo)
+  endif
+else
+  JPEG_DEFINE   =
+  JPEG_LIB      =
+  JPEG_INC      =
+endif
 
 # ================================================================
 # Ziel-Konfigurationen
@@ -57,6 +97,7 @@ endif
 
 ifeq ($(TARGET),bawt86)
 # BAWT 3.2 — Tcl 8.6 (MSVC-gebaut, .lib Stubs)
+# JPEG meist nicht in BAWT -> JPEG=0 empfohlen
 BAWT86      ?= C:/Bawt/Bawt86/Windows/x64/Development/opt/Tcl
 BAWT_GCC    ?= C:/Bawt/Bawt86/Tools/gcc14.2.0_x86_64-w64-mingw32/mingw64/bin
 CC          = $(BAWT_GCC)/gcc.exe
@@ -87,42 +128,52 @@ CC          ?= gcc
 
 DEFINES     = -DUSE_TCL_STUBS \
               -DPACKAGE_NAME=\"$(PACKAGE_NAME)\" \
-              -DPACKAGE_VERSION=\"$(PACKAGE_VERSION)\"
+              -DPACKAGE_VERSION=\"$(PACKAGE_VERSION)\" \
+              $(JPEG_DEFINE)
 
 CFLAGS      = -shared -O2 -std=c11 \
               -I$(TCL_INC) \
               -I$(CAIRO_INC) \
+              $(JPEG_INC) \
               $(DEFINES)
 
-LDFLAGS     = $(TCL_STUB) $(CAIRO_LIB) -lm
+LDFLAGS     = $(TCL_STUB) $(CAIRO_LIB) $(JPEG_LIB) -lm
 
 # Windows: DLL ohne lib-Prefix (Tcl-Konvention: NAME.dll → Name_Init)
-OUT         = tkmcairo.dll
+OUT         = tclmcairo.dll
 
 # ================================================================
 # Targets
 # ================================================================
 
-.PHONY: all test demo clean info
+.PHONY: all pkgIndex test demo clean info
 
-all: $(OUT)
+all: $(OUT) pkgIndex
 
-$(OUT): src/libtkmcairo.c
-	$(CC) $(CFLAGS) -o $(OUT) src/libtkmcairo.c $(LDFLAGS)
-	@echo "Built: $(OUT)  [TARGET=$(TARGET), Tcl=$(TCL_VER)]"
+$(OUT): src/libtclmcairo.c
+	$(CC) $(CFLAGS) -o $(OUT) src/libtclmcairo.c $(LDFLAGS)
+	@echo "Built: $(OUT)  [TARGET=$(TARGET), Tcl=$(TCL_VER), JPEG=$(JPEG)]"
 
-test: $(OUT)
-	TKMCAIRO_LIBDIR=. $(TCLSH) tests/test-tkmcairo.tcl
+# pkgIndex.tcl via PowerShell (kein sed auf Windows)
+pkgIndex:
+	powershell -Command "(Get-Content pkgIndex.tcl.in) -replace '@PACKAGE_NAME@','$(PACKAGE_NAME)' -replace '@PACKAGE_VERSION@','$(PACKAGE_VERSION)' | Set-Content pkgIndex.tcl"
+	@echo "Generated pkgIndex.tcl"
 
-demo: $(OUT)
-	TKMCAIRO_LIBDIR=. $(TCLSH) demos/demo-tkmcairo.tcl
+test: all
+	TCLMCAIRO_LIBDIR=. $(TCLSH) tests/test-tclmcairo.tcl
+
+demo: all
+	TCLMCAIRO_LIBDIR=. $(TCLSH) demos/demo-tclmcairo.tcl
 
 clean:
-	-rm -f $(OUT)
+	-rm -f $(OUT) pkgIndex.tcl
 
 info:
-	@echo "TARGET  = $(TARGET)"
-	@echo "TCL_INC = $(TCL_INC)"
-	@echo "CAIRO_INC = $(CAIRO_INC)"
-	@echo "OUT     = $(OUT)"
-	@echo "CC      = $(CC)"
+	@echo "TARGET       = $(TARGET)"
+	@echo "TCL_INC      = $(TCL_INC)"
+	@echo "CAIRO_INC    = $(CAIRO_INC)"
+	@echo "OUT          = $(OUT)"
+	@echo "CC           = $(CC)"
+	@echo "JPEG         = $(JPEG)"
+	@echo "JPEG_DEFINE  = $(JPEG_DEFINE)"
+	@echo "JPEG_LIB     = $(JPEG_LIB)"

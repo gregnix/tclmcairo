@@ -3,58 +3,58 @@
 # Wird durch ./configure zu Makefile generiert
 #-----------------------------------------------------------------------
 
-PKG_SOURCES  = @PKG_SOURCES@
-PKG_OBJECTS  = @PKG_OBJECTS@
+PKG_SOURCES  =  src/libtclmcairo.c
+PKG_OBJECTS  =  libtclmcairo.o
 
 # VPATH: .c Dateien in Unterverzeichnissen finden
-VPATH = @srcdir@/src:@srcdir@
-PKG_TCL_SOURCES = @PKG_TCL_SOURCES@
-PKG_HEADERS  = @PKG_HEADERS@
-PKG_LIB_FILE = @PKG_LIB_FILE@
+VPATH = ./src
+PKG_TCL_SOURCES =  tcl/tclmcairo-0.2.tm
+PKG_HEADERS  = 
+PKG_LIB_FILE = libtcl9tclmcairo
 PKG_DIR      = $(PACKAGE_NAME)$(PACKAGE_VERSION)
 
-PACKAGE_NAME    = @PACKAGE_NAME@
-PACKAGE_VERSION = @PACKAGE_VERSION@
+PACKAGE_NAME    = tclmcairo
+PACKAGE_VERSION = 0.2
 
-CC          = @CC@
-CLEANFILES  = @CLEANFILES@
-EXEEXT      = @EXEEXT@
-OBJEXT      = @OBJEXT@
-RANLIB      = @RANLIB@
-RANLIB_STUB = @RANLIB_STUB@
+CC          = gcc
+CLEANFILES  = 
+EXEEXT      = 
+OBJEXT      = o
+RANLIB      = :
+RANLIB_STUB = ranlib
 SHLIB_LD    = @SHLIB_LD@
 SHLIB_LD_LIBS = @SHLIB_LD_LIBS@
 SHLIB_SUFFIX = @SHLIB_SUFFIX@
-TCL_BIN_DIR = @TCL_BIN_DIR@
-TCL_SRC_DIR = @TCL_SRC_DIR@
-TCL_VERSION = @TCL_VERSION@
+TCL_BIN_DIR = /usr/lib/tcl9.0
+TCL_SRC_DIR = /usr/include/tcl9.0/tcl-private
+TCL_VERSION = 9.0
 # Override: make TCLSH=tclsh9.0 test
 TCLSH        = tclsh
-INSTALL     = @INSTALL@
-INSTALL_DATA= @INSTALL_DATA@
-INSTALL_PROGRAM = @INSTALL_PROGRAM@
-INSTALL_SCRIPT = @INSTALL_SCRIPT@
+INSTALL     = $(SHELL) $(srcdir)/tclconfig/install-sh -c
+INSTALL_DATA= ${INSTALL} -m 644
+INSTALL_PROGRAM = ${INSTALL} -m 755
+INSTALL_SCRIPT = ${INSTALL} -m 755
 
-prefix      = @prefix@
-exec_prefix = @exec_prefix@
-libdir      = @libdir@
-includedir  = @includedir@
-datarootdir = @datarootdir@
-datadir     = @datadir@
-mandir      = @mandir@
+prefix      = /usr
+exec_prefix = /usr
+libdir      = ${exec_prefix}/lib
+includedir  = ${prefix}/include
+datarootdir = ${prefix}/share
+datadir     = ${datarootdir}
+mandir      = ${datarootdir}/man
 
 PACKAGE_DIR = $(DESTDIR)$(libdir)/$(PKG_DIR)
 
-PKG_CFLAGS  = @PKG_CFLAGS@
+PKG_CFLAGS  =  -DHAVE_LIBJPEG  -std=c11 -Wall -Wextra
 
-INCLUDES    = @PKG_INCLUDES@ @TCL_INCLUDES@
-DEFINES     = @DEFS@ -DUSE_TCL_STUBS
+INCLUDES    =  -I/usr/include/cairo -I/usr/include/freetype2 -I/usr/include/libpng16 -I/usr/include/pixman-1 -I"/usr/include/tcl9.0/tcl-private/generic" -I"/usr/include/tcl9.0/tcl-private/unix"
+DEFINES     = -DPACKAGE_NAME=\"tclmcairo\" -DPACKAGE_TARNAME=\"tclmcairo\" -DPACKAGE_VERSION=\"0.2\" -DPACKAGE_STRING=\"tclmcairo\ 0.2\" -DPACKAGE_BUGREPORT=\"\" -DPACKAGE_URL=\"\" -DBUILD_tclmcairo=/\*\*/ -DHAVE_STDIO_H=1 -DHAVE_STDLIB_H=1 -DHAVE_STRING_H=1 -DHAVE_INTTYPES_H=1 -DHAVE_STDINT_H=1 -DHAVE_STRINGS_H=1 -DHAVE_SYS_STAT_H=1 -DHAVE_SYS_TYPES_H=1 -DHAVE_UNISTD_H=1 -DSTDC_HEADERS=1 -DUSE_TCL_STUBS=1 -DUSE_TCLOO_STUBS=1 -DUSE_TCL_STUBS
 
 # CFLAGS direkt — keine TEA-internen @VARS@ die nicht substituiert werden
 CFLAGS      = -shared -fPIC -O2 \
               $(INCLUDES) $(DEFINES) $(PKG_CFLAGS)
 
-LDFLAGS     = @PKG_LIBS@ @TCL_STUB_LIB_SPEC@ -lm
+LDFLAGS     =  -lcairo -ljpeg -lm -L/usr/lib/x86_64-linux-gnu -ltclstub9.0 -lm
 
 # ================================================================
 # Ziele
@@ -69,7 +69,7 @@ binaries: $(PKG_LIB_FILE)
 libraries:
 
 # Compile-Regel: src/*.c -> *.o im Build-Verzeichnis
-%.$(OBJEXT): @srcdir@/src/%.c
+%.$(OBJEXT): ./src/%.c
 	$(CC) -c $(CFLAGS) $< -o $@
 
 %.$(OBJEXT): %.c

@@ -1,28 +1,51 @@
-# tkmcairo — Cairo 2D Graphics for Tcl
+# tclmcairo — Cairo 2D Graphics for Tcl
 
 A lightweight Cairo binding for Tcl — no Tk required.
 Runs in `tclsh`. Output: PNG, PDF, SVG, PS, EPS.
 
-**Version:** 0.1  
+**Version:** 0.2  
 **License:** BSD  
 **Platform:** Linux, Windows (MSYS2 MINGW64, BAWT 3.2), macOS  
 **Tcl:** 8.6 or 9.0  
-**Tests:** 41/41 (Linux Tcl 8.6 + 9.0, Windows MINGW64 + BAWT)
+**Tests:** 82/82 (Linux Tcl 8.6 + 9.0, Windows MINGW64 + BAWT)
 
 ---
 
 ## Features
 
+**Drawing**
 - Shapes: `rect` (rounded corners), `circle`, `ellipse`, `arc`, `line`, `poly`
-- SVG paths: `M L H V C Q Z` fully supported; `A` with basic ellipse approximation
+- SVG paths: `M L H V C Q A Z` + relative variants
 - Text with font parsing (`Sans Bold Italic 14`), anchor, color, alpha
+- Text as path (`text_path`, `-outline`): gradient fill, fill+stroke on text
 - Font metrics: exact Cairo measurements (`font_measure`)
 - Transforms: translate / scale / rotate / reset
 - Gradients: linear + radial with color stops, `-fillname`
-- Line options: `-dash`, `-linecap`, `-linejoin`, `-alpha`
+- Line options: `-dash`, `-linecap`, `-linejoin`, `-alpha`, `-fillrule`
+
+**Output**
+- Raster mode (ARGB32/RGB24/A8) + Vector mode (true vectors)
+- Direct file-mode: `-mode pdf|svg|ps|eps -file filename`
+- Multi-page PDF/PS/SVG: `newpage` / `finish`
 - Output: `.png` `.pdf` `.svg` `.ps` `.eps`
-- Raster mode (ARGB32, transparent background) + Vector mode (true vectors in PDF/SVG)
-- Strict error handling: unknown options, invalid colors and values all raise errors
+- `topng` — PNG as bytearray (no file needed)
+- `todata` — raw ARGB32 pixels for Tk photo integration
+
+**Images**
+- Load PNG + JPEG (`image filename x y`)
+- Load PNG from bytes (`image_data bytes x y`)
+- JPEG auto-embedded as MIME data in PDF/SVG (no re-encoding)
+- PNG formats: `argb32` (default), `rgb24`, `a8` (mask)
+
+**Compositing**
+- `push` / `pop` — Cairo state stack
+- `clip_rect`, `clip_path`, `clip_reset` — clip regions
+- `blit src x y` — composite context onto context (layer model)
+
+**Quality**
+- Strict error handling: unknown options, invalid values all raise errors
+- `Tcl_CallWhenDeleted` — safe interpreter shutdown, no memory leaks
+- Cairo status checked after surface/context creation
 
 ---
 
@@ -30,14 +53,17 @@ Runs in `tclsh`. Output: PNG, PDF, SVG, PS, EPS.
 
 ```bash
 # Linux (Debian/Ubuntu)
-sudo apt install libcairo2-dev tcl8.6-dev build-essential autoconf
+sudo apt install libcairo2-dev libjpeg-dev tcl8.6-dev build-essential autoconf
 
 # macOS
-brew install cairo tcl-tk autoconf
+brew install cairo jpeg tcl-tk autoconf
 
 # Windows (MSYS2 MINGW64)
-pacman -S mingw-w64-x86_64-tcl mingw-w64-x86_64-cairo mingw-w64-x86_64-gcc
+pacman -S mingw-w64-x86_64-tcl mingw-w64-x86_64-cairo \
+          mingw-w64-x86_64-libjpeg-turbo mingw-w64-x86_64-gcc
 ```
+
+JPEG support is optional (`make JPEG=0` to disable).
 
 ---
 
@@ -45,191 +71,131 @@ pacman -S mingw-w64-x86_64-tcl mingw-w64-x86_64-cairo mingw-w64-x86_64-gcc
 
 ### Linux / macOS
 
-#### Option A: Simple Makefile (no autoconf needed)
+#### Option A: TEA (recommended)
 
 ```bash
-make check-deps
+autoconf
+./configure --with-tcl=/usr/lib/tcl8.6
 make
 make test
 make demo
 ```
 
-#### Option B: TEA (autoconf)
+#### Option B: Simple Makefile (no autoconf)
 
 ```bash
-autoconf
-./configure --with-tcl=/usr/lib/tcl8.6
-make && make test && make demo
-make install   # optional
+make -f Makefile
+make test
 ```
 
-**Tcl 9.0:**
-```bash
-./configure --with-tcl=/usr/lib/tcl9.0
-make && make test TCLSH=tclsh9.0
+### Windows (MSYS2 or BAWT)
+
+```bat
+build-win.bat 86         # Tcl 8.6, JPEG auto-detected
+build-win.bat 86 nojpeg  # without JPEG
+test-win.bat 86
 ```
 
-### Windows (MSYS2 MINGW64)
-
-```bash
-make -f Makefile.win TARGET=mingw64
-make -f Makefile.win TARGET=mingw64 test
-make -f Makefile.win TARGET=mingw64 demo
-```
-
-### Windows (BAWT 3.2)
-
-```cmd
-check-bawt.bat       # verify BAWT + Cairo paths
-build-win.bat        # build with BAWT Tcl 8.6
-test-win.bat         # test with BAWT tclsh
-```
-
-**Note:** tkmcairo is not integrated into BAWT. The build uses BAWT's
-Tcl/gcc toolchain but takes Cairo from MSYS2 MINGW64 (`C:\msys64\mingw64`).
-MSYS2 must be installed separately: https://www.msys2.org/
+Or with GNU make in MSYS2:
 
 ```bash
-# In MSYS2 MINGW64 shell — install Cairo once:
-pacman -S mingw-w64-x86_64-cairo
+make -f Makefile.win
+make -f Makefile.win test
 ```
-
-`test-win.bat` adds `C:\msys64\mingw64\bin` to PATH automatically for `cairo.dll`.
 
 ---
 
 ## Quick Start
 
 ```tcl
-package require tkmcairo
+package require tclmcairo
 
-set ctx [tkmcairo::new 400 300]              ;# raster mode
-set ctx [tkmcairo::new 400 300 -mode vector] ;# vector mode (PDF/SVG)
+# Create context
+set ctx [tclmcairo::new 400 300]
+$ctx clear 0.1 0.1 0.2
 
-$ctx clear 0.08 0.10 0.18
-
-$ctx rect    10  10 200 100 -fill {1 0.5 0} -stroke {1 1 1} -radius 8
-$ctx circle 300 150  60     -fill {0.2 0.5 1 0.8}
-$ctx ellipse 100 200  80 30 -stroke {1 1 0} -width 2
-$ctx line      0   0 400 300 -color {0.5 0.5 0.5} -dash {8 4}
-
-$ctx path "M 50 50 L 150 50 L 100 130 Z" -fill {0.8 0.2 0.4}
-
-$ctx text 200 150 "Hello World" -font "Sans Bold 18" -color {1 1 1} -anchor center
-
-$ctx gradient_linear bg 0 0 400 0 {{0 0.1 0.1 0.3 1} {1 0.2 0.1 0.4 1}}
+# Draw
+$ctx gradient_linear bg 0 0 400 0 {{0 0.2 0.5 0.9 1} {1 0.1 0.3 0.6 1}}
 $ctx rect 0 0 400 300 -fillname bg
+$ctx circle 200 150 80 -fill {1 0.7 0.2 0.9} -stroke {1 1 1} -width 2
 
-$ctx save "output.png"   ;# PNG
-$ctx save "output.pdf"   ;# PDF (vector if -mode vector)
-$ctx save "output.svg"   ;# SVG
-$ctx save "output.ps"    ;# PostScript
-$ctx save "output.eps"   ;# Encapsulated PostScript
+# Text as path with gradient
+$ctx gradient_linear tg 0 0 400 0 {{0 1 0.9 0.2 1} {1 0.2 0.6 1 1}}
+$ctx text 200 150 "tclmcairo" -font "Sans Bold 36" \
+    -fillname tg -outline 1 -anchor center
 
+# Output
+$ctx save "output.png"
+$ctx save "output.pdf"
+set pngbytes [$ctx topng]   ;# PNG bytes without file
 $ctx destroy
 ```
 
----
-
-## Output Formats
-
-| Format | Vector mode | Raster mode | Notes |
-|--------|-------------|-------------|-------|
-| `.png` | rasterized | ARGB32 | transparent background possible |
-| `.pdf` | true vectors | bitmap embedded | scalable |
-| `.svg` | true vectors | bitmap embedded | |
-| `.ps`  | true vectors | bitmap embedded | for printing |
-| `.eps` | true vectors | bitmap embedded | for LaTeX etc. |
-
-Use `-mode vector` for PDF/SVG/PS/EPS to get true vector output.
-
----
-
-## Directory Structure
-
-```
-tkmcairo/
-├── configure.in          TEA build definition
-├── Makefile.in           TEA Makefile template
-├── Makefile              Simple fallback (no autoconf)
-├── Makefile.win          Windows build (MSYS2 + BAWT)
-├── build-win.bat         Windows BAWT build
-├── test-win.bat          Windows BAWT test
-├── check-bawt.bat        Check BAWT installation
-├── pkgIndex.tcl.in       Package index template
-├── aclocal.m4            Links tclconfig/tcl.m4
-├── tclconfig/            TEA scripts (git submodule)
-├── src/
-│   └── libtkmcairo.c     C extension (~1050 lines)
-├── tcl/
-│   └── tkmcairo-0.1.tm   TclOO wrapper (~170 lines)
-├── tests/
-│   └── test-tkmcairo.tcl 41 tests
-├── demos/
-│   └── demo-tkmcairo.tcl 5 demos x 5 formats (PNG/PDF/SVG/PS/EPS)
-└── docs/
-    └── api-reference.md  Full API documentation
-```
-
----
-
-## API Summary
+### Multi-page PDF
 
 ```tcl
-tkmcairo::new width height ?-mode raster|vector?  -> ctx
+set ctx [tclmcairo::new 595 842 -mode pdf -file "report.pdf"]
+$ctx clear 1 1 1
+$ctx text 297 100 "Page 1" -font "Sans Bold 24" -color {0 0 0} -anchor center
+$ctx newpage
+$ctx clear 1 1 1
+$ctx text 297 100 "Page 2" -font "Sans Bold 24" -color {0 0 0.8} -anchor center
+$ctx finish
 $ctx destroy
-$ctx size    -> {width height}
-$ctx save    filename
-$ctx todata  -> bytearray ARGB32
-$ctx clear   r g b ?a?
+```
 
-$ctx rect    x y w h    ?opts?
-$ctx line    x1 y1 x2 y2 ?opts?
-$ctx circle  cx cy r    ?opts?
-$ctx ellipse cx cy rx ry ?opts?
-$ctx arc     cx cy r start_deg end_deg ?opts?
-$ctx poly    x1 y1 x2 y2 x3 y3 ... ?opts?
-$ctx path    svgdata ?opts?
-$ctx text    x y string ?opts?
+### Layer compositing
 
-$ctx font_measure string font  -> {width height ascent descent}
-
-$ctx transform -translate x y
-$ctx transform -scale sx sy
-$ctx transform -rotate deg
-$ctx transform -reset
-
-$ctx gradient_linear name x1 y1 x2 y2 {{offset r g b a} ...}
-$ctx gradient_radial  name cx cy r    {{offset r g b a} ...}
+```tcl
+set bg  [tclmcairo::new 600 400]
+set fg  [tclmcairo::new 600 400]   ;# transparent
+# ... draw on each layer ...
+$bg blit $fg 0 0
+$bg blit $overlay 20 300 -alpha 0.8
+$bg save "composite.png"
 ```
 
 ---
 
-## Notes
+## Demos
 
-- **Text:** Cairo Toy API — Latin scripts only. 
-- **Windows:** Tcl 8.6 only (Tcl 9 not packaged in MSYS2 MINGW64/UCRT64).
-- **poly:** minimum 3 coordinate pairs (6 values).
-- **-alpha:** validated 0.0–1.0; -linecap/-linejoin: validated against allowed values.
+```bash
+make demo       # Linux
+make demo TCLSH=tclsh9.0
+```
+
+Generates 12 demo files in `demos/`:
+
+| Demo | Content |
+|------|---------|
+| 1 | Shapes (rect, circle, ellipse, lines) |
+| 2 | SVG paths + fillrule evenodd |
+| 3 | Gradients (linear + radial) |
+| 4 | Text + font metrics + anchors |
+| 5 | PDF vector output (A4) |
+| 6 | Multi-page PDF (3 pages) |
+| 7 | Clip regions (clip_rect, clip_path, push/pop) |
+| 8 | text_path (gradient, outline, shadow, clipped) |
+| 9 | PNG transparency (transparent BG, alpha, fade) |
+| 10 | Blit / layer compositing |
+| 11 | PNG formats (argb32, rgb24, a8), topng, image_data |
+| 12 | MIME data embedding (JPEG 1:1 in PDF, 25% smaller) |
 
 ---
 
-## Relation to Other Projects
+## API Reference
 
-```
-tkmcairo          Cairo for tclsh, no Tk required
-    |
-    +-- tkpath    Tk-Canvas SVG extension (separate, Cairo on Linux)
-    |             https://wiki.tcl-lang.org/page/tkpath
-    |             https://github.com/tcltk-depot/tkpath
-    +-- pdf4tcl   PDF document library (forms, encryption, multi-page)
-```
+See `docs/api-reference.md` for the full API.
 
-tkmcairo and tkpath are complementary: tkpath for interactive Tk-Canvas,
-tkmcairo for headless file output.
+---
+
+## Thread Safety
+
+**Not thread-safe.** Use one tclmcairo interpreter per thread,
+or add external locking. This matches Tk's threading model.
 
 ---
 
 ## License
 
-BSD 2-Clause. See LICENSE.
+BSD 2-Clause — see `LICENSE`.

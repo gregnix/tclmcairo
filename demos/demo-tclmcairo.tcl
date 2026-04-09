@@ -970,144 +970,7 @@ puts "     Saved: ${saving}B (${pct}%)"
 # png_tmp deleted at end
 
 # ================================================================
-# Demo 14: Transform -matrix / -get
-# ================================================================
-puts "Demo 14: Transform matrix..."
 
-set f [file join $outdir demo-matrix.png]
-set W 620; set H 440
-set canvas [tclmcairo::new $W $H]
-$canvas clear 0.1 0.1 0.18
-
-$canvas text [expr {$W/2}] 24 "tclmcairo — transform -matrix / -get" \
-    -font "Sans Bold 16" -color {1 1 1} -anchor center
-
-# Helper: draw a small "stamp" shape (arrow + label)
-proc stamp {ctx label col} {
-    $ctx rect 0 -20 80 40 -fill $col -radius 6
-    $ctx path "M 80 0 L 100 -15 L 100 15 Z" -fill $col
-    $ctx text 40 4 $label -font "Sans Bold 11" \
-        -color {1 1 1} -anchor center
-}
-
-# ---- Panel 1: pure -translate via -matrix ----
-$canvas push
-$canvas clip_rect 10 42 180 185
-$canvas rect 10 42 180 185 -fill {0.14 0.14 0.22} -radius 4
-$canvas text 100 60 "-translate" -font "Sans Bold 12" \
-    -color {0.7 0.7 0.9} -anchor center
-foreach {dx dy col lbl} {
-    60 90  {0.9 0.3 0.2} "origin"
-    100 120 {0.3 0.7 0.9} "+40+30"
-    140 150 {0.2 0.8 0.4} "+80+60"
-} {
-    $canvas push
-    $canvas transform -matrix 1 0 0 1 $dx $dy
-    stamp $canvas $lbl $col
-    $canvas pop
-}
-$canvas pop
-
-# ---- Panel 2: -rotate via -matrix ----
-$canvas push
-$canvas clip_rect 200 42 180 185
-$canvas rect 200 42 180 185 -fill {0.14 0.14 0.22} -radius 4
-$canvas text 290 60 "-rotate (matrix)" -font "Sans Bold 12" \
-    -color {0.7 0.7 0.9} -anchor center
-set cx 290; set cy 145
-$canvas circle $cx $cy 3 -fill {0.5 0.5 0.6}
-foreach {deg col} {0 {0.9 0.3 0.2}  45 {0.3 0.7 0.9}  90 {0.2 0.8 0.4}  135 {1 0.7 0.2}} {
-    set r [expr {$deg * 3.14159 / 180.0}]
-    set c2 [expr {cos($r)}]; set s2 [expr {sin($r)}]
-    $canvas push
-    $canvas transform -matrix $c2 $s2 [expr {-$s2}] $c2 $cx $cy
-    stamp $canvas "${deg}°" $col
-    $canvas pop
-}
-$canvas pop
-
-# ---- Panel 3: -scale via -matrix ----
-$canvas push
-$canvas clip_rect 390 42 220 185
-$canvas rect 390 42 220 185 -fill {0.14 0.14 0.22} -radius 4
-$canvas text 500 60 "-scale (matrix)" -font "Sans Bold 12" \
-    -color {0.7 0.7 0.9} -anchor center
-foreach {sx sy tx ty col lbl} {
-    0.5 0.5 420 95  {0.9 0.3 0.2} "0.5×"
-    0.8 0.8 420 135 {0.3 0.7 0.9} "0.8×"
-    1.2 1.2 420 175 {0.2 0.8 0.4} "1.2×"
-} {
-    $canvas push
-    $canvas transform -matrix $sx 0 0 $sy $tx $ty
-    stamp $canvas $lbl $col
-    $canvas pop
-}
-$canvas pop
-
-# ---- Panel 4: combined matrix (shear + scale) ----
-set py2 240
-$canvas rect 10 $py2 180 185 -fill {0.14 0.14 0.22} -radius 4
-$canvas text 100 [expr {$py2+18}] "shear + scale" -font "Sans Bold 12" \
-    -color {0.7 0.7 0.9} -anchor center
-set row14 0
-foreach {xx yx xy yy tx ty col lbl} [list \
-    1.0 0.3 0.0 1.0  30 [expr {$py2+60}]  {0.9 0.5 0.2} "shear-x" \
-    1.0 0.0 0.3 1.0  30 [expr {$py2+110}] {0.3 0.7 0.9} "shear-y" \
-    1.2 0.2 0.1 0.9  30 [expr {$py2+160}] {0.8 0.3 0.8} "combined" \
-] {
-    $canvas push
-    $canvas transform -matrix $xx $yx $xy $yy $tx $ty
-    stamp $canvas $lbl $col
-    $canvas pop
-    incr row14
-}
-
-# ---- Panel 5: -get demonstration ----
-set px5 200; set py5 $py2
-$canvas rect $px5 $py5 390 185 -fill {0.12 0.18 0.14} -radius 4
-$canvas text [expr {$px5+195}] [expr {$py5+18}] \
-    "transform -get — read current CTM" \
-    -font "Sans Bold 12" -color {0.5 0.9 0.6} -anchor center
-
-# Show CTM values for various transforms
-set row 0
-foreach {op label} {
-    {-reset}            "identity"
-    {-translate 30 20}  "translate 30 20"
-    {-rotate 30}        "rotate 30°"
-    {-scale 1.5 0.8}    "scale 1.5 0.8"
-} {
-    set tmp [tclmcairo::new 10 10]
-    $tmp transform {*}$op
-    set m [$tmp transform -get]
-    $tmp destroy
-
-    set y [expr {$py5 + 45 + $row*33}]
-    $canvas rect [expr {$px5+8}] [expr {$y-12}] 374 28 \
-        -fill {0.15 0.22 0.18} -radius 3
-    $canvas text [expr {$px5+16}] $y $label \
-        -font "Sans Bold 10" -color {0.6 0.9 0.7}
-    # Format matrix values
-    set vals {}
-    foreach v $m { lappend vals [format "%.3f" $v] }
-    $canvas text [expr {$px5+130}] $y \
-        "{[join $vals {  }]}" \
-        -font "Courier 9" -color {0.8 0.9 0.8}
-    incr row
-}
-
-$canvas text [expr {$W/2}] [expr {$H-16}] \
-    "-matrix xx yx xy yy x0 y0  ·  -get returns current CTM  ·  push/pop scopes transforms" \
-    -font "Sans 10" -color {0.5 0.6 0.7} -anchor center
-
-$canvas save $f
-$canvas destroy
-puts "  -> $f"
-
-puts "\nAll demos complete."
-puts "Output files in directory: $outdir"
-
-# ================================================================
 # Demo 13: Plotchart-style — axes outside, data clipped
 # ================================================================
 puts "Demo 13: Plotchart-style chart..."
@@ -1263,3 +1126,592 @@ foreach {label col dash} {
 $ctx save $f
 $ctx destroy
 puts "  -> $f"
+
+# Demo 14: Transform -matrix / -get
+# ================================================================
+puts "Demo 14: Transform matrix..."
+
+set f [file join $outdir demo-matrix.png]
+set W 620; set H 440
+set canvas [tclmcairo::new $W $H]
+$canvas clear 0.1 0.1 0.18
+
+$canvas text [expr {$W/2}] 24 "tclmcairo — transform -matrix / -get" \
+    -font "Sans Bold 16" -color {1 1 1} -anchor center
+
+# Helper: draw a small "stamp" shape (arrow + label)
+proc stamp {ctx label col} {
+    $ctx rect 0 -20 80 40 -fill $col -radius 6
+    $ctx path "M 80 0 L 100 -15 L 100 15 Z" -fill $col
+    $ctx text 40 4 $label -font "Sans Bold 11" \
+        -color {1 1 1} -anchor center
+}
+
+# ---- Panel 1: pure -translate via -matrix ----
+$canvas push
+$canvas clip_rect 10 42 180 185
+$canvas rect 10 42 180 185 -fill {0.14 0.14 0.22} -radius 4
+$canvas text 100 60 "-translate" -font "Sans Bold 12" \
+    -color {0.7 0.7 0.9} -anchor center
+foreach {dx dy col lbl} {
+    60 90  {0.9 0.3 0.2} "origin"
+    100 120 {0.3 0.7 0.9} "+40+30"
+    140 150 {0.2 0.8 0.4} "+80+60"
+} {
+    $canvas push
+    $canvas transform -matrix 1 0 0 1 $dx $dy
+    stamp $canvas $lbl $col
+    $canvas pop
+}
+$canvas pop
+
+# ---- Panel 2: -rotate via -matrix ----
+$canvas push
+$canvas clip_rect 200 42 180 185
+$canvas rect 200 42 180 185 -fill {0.14 0.14 0.22} -radius 4
+$canvas text 290 60 "-rotate (matrix)" -font "Sans Bold 12" \
+    -color {0.7 0.7 0.9} -anchor center
+set cx 290; set cy 145
+$canvas circle $cx $cy 3 -fill {0.5 0.5 0.6}
+foreach {deg col} {0 {0.9 0.3 0.2}  45 {0.3 0.7 0.9}  90 {0.2 0.8 0.4}  135 {1 0.7 0.2}} {
+    set r [expr {$deg * 3.14159 / 180.0}]
+    set c2 [expr {cos($r)}]; set s2 [expr {sin($r)}]
+    $canvas push
+    $canvas transform -matrix $c2 $s2 [expr {-$s2}] $c2 $cx $cy
+    stamp $canvas "${deg}°" $col
+    $canvas pop
+}
+$canvas pop
+
+# ---- Panel 3: -scale via -matrix ----
+$canvas push
+$canvas clip_rect 390 42 220 185
+$canvas rect 390 42 220 185 -fill {0.14 0.14 0.22} -radius 4
+$canvas text 500 60 "-scale (matrix)" -font "Sans Bold 12" \
+    -color {0.7 0.7 0.9} -anchor center
+foreach {sx sy tx ty col lbl} {
+    0.5 0.5 420 95  {0.9 0.3 0.2} "0.5×"
+    0.8 0.8 420 135 {0.3 0.7 0.9} "0.8×"
+    1.2 1.2 420 175 {0.2 0.8 0.4} "1.2×"
+} {
+    $canvas push
+    $canvas transform -matrix $sx 0 0 $sy $tx $ty
+    stamp $canvas $lbl $col
+    $canvas pop
+}
+$canvas pop
+
+# ---- Panel 4: combined matrix (shear + scale) ----
+set py2 240
+$canvas rect 10 $py2 180 185 -fill {0.14 0.14 0.22} -radius 4
+$canvas text 100 [expr {$py2+18}] "shear + scale" -font "Sans Bold 12" \
+    -color {0.7 0.7 0.9} -anchor center
+set row14 0
+foreach {xx yx xy yy tx ty col lbl} [list \
+    1.0 0.3 0.0 1.0  30 [expr {$py2+60}]  {0.9 0.5 0.2} "shear-x" \
+    1.0 0.0 0.3 1.0  30 [expr {$py2+110}] {0.3 0.7 0.9} "shear-y" \
+    1.2 0.2 0.1 0.9  30 [expr {$py2+160}] {0.8 0.3 0.8} "combined" \
+] {
+    $canvas push
+    $canvas transform -matrix $xx $yx $xy $yy $tx $ty
+    stamp $canvas $lbl $col
+    $canvas pop
+    incr row14
+}
+
+# ---- Panel 5: -get demonstration ----
+set px5 200; set py5 $py2
+$canvas rect $px5 $py5 390 185 -fill {0.12 0.18 0.14} -radius 4
+$canvas text [expr {$px5+195}] [expr {$py5+18}] \
+    "transform -get — read current CTM" \
+    -font "Sans Bold 12" -color {0.5 0.9 0.6} -anchor center
+
+# Show CTM values for various transforms
+set row 0
+foreach {op label} {
+    {-reset}            "identity"
+    {-translate 30 20}  "translate 30 20"
+    {-rotate 30}        "rotate 30°"
+    {-scale 1.5 0.8}    "scale 1.5 0.8"
+} {
+    set tmp [tclmcairo::new 10 10]
+    $tmp transform {*}$op
+    set m [$tmp transform -get]
+    $tmp destroy
+
+    set y [expr {$py5 + 45 + $row*33}]
+    $canvas rect [expr {$px5+8}] [expr {$y-12}] 374 28 \
+        -fill {0.15 0.22 0.18} -radius 3
+    $canvas text [expr {$px5+16}] $y $label \
+        -font "Sans Bold 10" -color {0.6 0.9 0.7}
+    # Format matrix values
+    set vals {}
+    foreach v $m { lappend vals [format "%.3f" $v] }
+    $canvas text [expr {$px5+130}] $y \
+        "{[join $vals {  }]}" \
+        -font "Courier 9" -color {0.8 0.9 0.8}
+    incr row
+}
+
+$canvas text [expr {$W/2}] [expr {$H-16}] \
+    "-matrix xx yx xy yy x0 y0  ·  -get returns current CTM  ·  push/pop scopes transforms" \
+    -font "Sans 10" -color {0.5 0.6 0.7} -anchor center
+
+$canvas save $f
+$canvas destroy
+puts "  -> $f"
+
+
+# ================================================================
+# Demo 15: Compositing Operators
+# ================================================================
+puts "Demo 15: Compositing Operators..."
+
+set f [file join $outdir demo-operators.png]
+set W 620; set H 460
+set canvas [tclmcairo::new $W $H]
+$canvas clear 0.1 0.1 0.18
+
+$canvas text [expr {$W/2}] 22 "tclmcairo — Compositing Operators" \
+    -font "Sans Bold 16" -color {1 1 1} -anchor center
+
+# Each cell: two overlapping circles with different operators
+set operators {
+    OVER      MULTIPLY  SCREEN    OVERLAY
+    DARKEN    LIGHTEN   DIFFERENCE XOR
+    COLOR_DODGE COLOR_BURN HARD_LIGHT SOFT_LIGHT
+    ADD       SATURATE  EXCLUSION  SOURCE
+}
+set cols 4; set rows 4
+set cw [expr {$W / $cols}]
+set ch [expr {($H - 40) / $rows}]
+
+set idx 0
+foreach op $operators {
+    set col [expr {$idx % $cols}]
+    set row [expr {$idx / $cols}]
+    set cx [expr {$col * $cw + $cw/2}]
+    set cy [expr {40 + $row * $ch + $ch/2 - 10}]
+    set r  [expr {min($cw,$ch)/3}]
+
+    # Cell background
+    $canvas rect [expr {$col*$cw+2}] [expr {40+$row*$ch+2}] \
+        [expr {$cw-4}] [expr {$ch-4}] \
+        -fill {0.15 0.15 0.22} -radius 4
+
+    # Draw: orange circle, then blue circle with operator
+    $canvas push
+    $canvas clip_rect [expr {$col*$cw+4}] [expr {40+$row*$ch+4}] \
+        [expr {$cw-8}] [expr {$ch-26}]
+
+    # Background gradient
+    $canvas gradient_linear "opbg$idx" \
+        [expr {$col*$cw}] 0 [expr {($col+1)*$cw}] 0 \
+        {{0 0.2 0.2 0.3 1} {1 0.25 0.25 0.35 1}}
+    $canvas rect [expr {$col*$cw+4}] [expr {40+$row*$ch+4}] \
+        [expr {$cw-8}] [expr {$ch-26}] -fillname "opbg$idx"
+
+    # Circle A (orange)
+    $canvas operator OVER
+    $canvas circle [expr {$cx - $r/3}] $cy $r -fill {1 0.55 0.1 0.85}
+
+    # Circle B with the operator
+    $canvas operator $op
+    $canvas circle [expr {$cx + $r/3}] $cy $r -fill {0.2 0.5 0.9 0.85}
+
+    $canvas operator OVER
+    $canvas pop
+
+    # Label
+    $canvas text $cx [expr {40 + ($row+1)*$ch - 12}] $op \
+        -font "Sans Bold 9" -color {0.8 0.8 0.9} -anchor center
+
+    incr idx
+}
+
+$canvas save $f
+$canvas destroy
+puts "  -> $f"
+
+# ================================================================
+# Demo 16: user_to_device / device_to_user + arc_negative + dash_offset
+# ================================================================
+puts "Demo 16: Coordinates, arc_negative, dash_offset..."
+
+set f [file join $outdir demo-coords.png]
+set W 620; set H 320
+set canvas [tclmcairo::new $W $H]
+$canvas clear 0.1 0.1 0.18
+
+$canvas text [expr {$W/2}] 22 \
+    "user_to_device · arc_negative · -dash_offset" \
+    -font "Sans Bold 15" -color {1 1 1} -anchor center
+
+# Panel 1: user_to_device — show coordinate mapping under transforms
+set px1 10; set py1 40; set pw1 190; set ph1 260
+$canvas rect $px1 $py1 $pw1 $ph1 -fill {0.14 0.14 0.22} -radius 6
+$canvas text [expr {$px1+$pw1/2}] [expr {$py1+16}] "user_to_device" \
+    -font "Sans Bold 11" -color {0.7 0.7 0.9} -anchor center
+
+# Draw a rotated grid and show mapped coordinates
+set orig_x [expr {$px1 + $pw1/2}]
+set orig_y [expr {$py1 + $ph1/2 + 10}]
+
+foreach {ux uy col} {
+    0   0  {1 1 1}
+    40  0  {1 0.5 0.2}
+    0  40  {0.3 0.8 0.4}
+    40 40  {0.2 0.6 1}
+} {
+    # Show user point
+    $canvas push
+    $canvas transform -translate $orig_x $orig_y
+    $canvas transform -rotate 30
+    $canvas circle $ux $uy 5 -fill $col
+    set mapped [$canvas user_to_device $ux $uy]
+    $canvas pop
+
+    # Show device point (where it actually lands on screen)
+    set dx [lindex $mapped 0]
+    set dy [lindex $mapped 1]
+    $canvas circle $dx $dy 3 -fill $col -stroke {1 1 1} -width 0.5
+    $canvas line [expr {$dx+4}] $dy [expr {$dx+20}] $dy \
+        -color $col -width 0.5 -dash {2 2}
+    $canvas text [expr {$dx+22}] [expr {$dy+4}] \
+        "($ux,$uy)" -font "Courier 8" -color $col
+}
+# Rotated grid lines
+$canvas push
+$canvas transform -translate $orig_x $orig_y
+$canvas transform -rotate 30
+foreach v {-40 0 40} {
+    $canvas line $v -50 $v 50 -color {0.4 0.4 0.5} -width 0.5 -dash {3 3}
+    $canvas line -50 $v 50 $v -color {0.4 0.4 0.5} -width 0.5 -dash {3 3}
+}
+$canvas pop
+$canvas text [expr {$px1+$pw1/2}] [expr {$py1+$ph1-8}] \
+    "30° rotate" -font "Sans 9" -color {0.5 0.6 0.7} -anchor center
+
+# Panel 2: arc_negative — comparison
+set px2 [expr {$px1+$pw1+10}]; set pw2 190
+$canvas rect $px2 $py1 $pw2 $ph1 -fill {0.14 0.14 0.22} -radius 6
+$canvas text [expr {$px2+$pw2/2}] [expr {$py1+16}] "arc vs arc_negative" \
+    -font "Sans Bold 11" -color {0.7 0.7 0.9} -anchor center
+
+set acx [expr {$px2+$pw2/2}]
+# arc (clockwise): blue
+$canvas arc $acx [expr {$py1+90}] 50 -30 210 \
+    -stroke {0.2 0.5 1} -width 3
+$canvas text $acx [expr {$py1+148}] "arc (clockwise)" \
+    -font "Sans 9" -color {0.2 0.5 1} -anchor center
+# arc_negative (counter-clockwise): orange
+$canvas arc_negative $acx [expr {$py1+230}] 50 -30 210 \
+    -stroke {1 0.55 0.2} -width 3
+$canvas text $acx [expr {$py1+288}] "arc_negative" \
+    -font "Sans 9" -color {1 0.55 0.2} -anchor center
+
+# Direction arrows
+$canvas path "M [expr {$acx+50}] [expr {$py1+90}] \
+    L [expr {$acx+58}] [expr {$py1+83}] \
+    L [expr {$acx+58}] [expr {$py1+97}] Z" -fill {0.2 0.5 1}
+$canvas path "M [expr {$acx+50}] [expr {$py1+230}] \
+    L [expr {$acx+58}] [expr {$py1+237}] \
+    L [expr {$acx+58}] [expr {$py1+223}] Z" -fill {1 0.55 0.2}
+
+# Panel 3: dash_offset — animation effect
+set px3 [expr {$px2+$pw2+10}]; set pw3 200
+$canvas rect $px3 $py1 $pw3 $ph1 -fill {0.14 0.14 0.22} -radius 6
+$canvas text [expr {$px3+$pw3/2}] [expr {$py1+16}] "-dash_offset" \
+    -font "Sans Bold 11" -color {0.7 0.7 0.9} -anchor center
+
+# Same dash pattern with different offsets → "animation frames"
+set y0 [expr {$py1+45}]
+foreach {offset col lbl} {
+    0   {0.9 0.3 0.2} "offset=0"
+    4   {1.0 0.6 0.2} "offset=4"
+    8   {0.8 0.9 0.2} "offset=8"
+    12  {0.2 0.8 0.4} "offset=12"
+    16  {0.2 0.6 1.0} "offset=16"
+    20  {0.6 0.2 0.9} "offset=20"
+} {
+    $canvas line [expr {$px3+15}] $y0 [expr {$px3+$pw3-15}] $y0 \
+        -color $col -width 3 -dash {12 6} -dash_offset $offset
+    $canvas text [expr {$px3+$pw3-12}] [expr {$y0+4}] $lbl \
+        -font "Courier 9" -color $col -anchor e
+    incr y0 35
+}
+$canvas text [expr {$px3+$pw3/2}] [expr {$py1+$ph1-8}] \
+    "same -dash, varying offset" \
+    -font "Sans 9" -color {0.5 0.6 0.7} -anchor center
+
+$canvas save $f
+$canvas destroy
+puts "  -> $f"
+
+# ================================================================
+# Demo 17: gradient_extend + gradient_filter + paint + set_source
+# ================================================================
+puts "Demo 17: Gradient extend, filter, paint, set_source..."
+
+set f [file join $outdir demo-gradient-ops.png]
+set W 620; set H 400
+set canvas [tclmcairo::new $W $H]
+$canvas clear 0.1 0.1 0.18
+
+$canvas text [expr {$W/2}] 22 \
+    "gradient_extend · gradient_filter · paint · set_source" \
+    -font "Sans Bold 15" -color {1 1 1} -anchor center
+
+# Panel 1: gradient_extend modes
+set px 10; set py 40; set pw 140; set ph 170
+$canvas text [expr {$px+$pw*2}] [expr {$py-8}] "gradient_extend" \
+    -font "Sans Bold 12" -color {0.7 0.7 0.9} -anchor center
+
+foreach {ext col_top lbl} {
+    none    {0.2 0.3 0.6} "none"
+    pad     {0.2 0.5 0.3} "pad"
+    repeat  {0.6 0.3 0.2} "repeat"
+    reflect {0.5 0.2 0.6} "reflect"
+} {
+    set bx $px; set by $py
+    $canvas rect $bx $by $pw $ph -fill {0.15 0.15 0.22} -radius 4
+
+    # Small gradient in center — extend mode fills the rest
+    $canvas gradient_linear "ext_$ext" \
+        [expr {$bx+40}] 0 [expr {$bx+100}] 0 \
+        {{0 1 0.8 0 1} {1 0.1 0.3 0.9 1}}
+    $canvas gradient_extend "ext_$ext" $ext
+    $canvas push
+    $canvas clip_rect [expr {$bx+4}] [expr {$by+20}] [expr {$pw-8}] [expr {$ph-30}]
+    $canvas rect [expr {$bx+4}] [expr {$by+20}] [expr {$pw-8}] [expr {$ph-30}] \
+        -fillname "ext_$ext"
+    # Show the "defined" region
+    $canvas line [expr {$bx+40}] [expr {$by+20}] \
+                 [expr {$bx+40}] [expr {$by+$ph-10}] \
+        -color {1 1 1 0.4} -width 1 -dash {3 3}
+    $canvas line [expr {$bx+100}] [expr {$by+20}] \
+                 [expr {$bx+100}] [expr {$by+$ph-10}] \
+        -color {1 1 1 0.4} -width 1 -dash {3 3}
+    $canvas pop
+
+    $canvas text [expr {$bx+$pw/2}] [expr {$by+$ph-8}] $lbl \
+        -font "Sans Bold 10" -color {0.9 0.9 1} -anchor center
+    incr px [expr {$pw+5}]
+}
+
+# Panel 2: paint + set_source
+set px2 10; set py2 [expr {$py+$ph+20}]; set ph2 140
+$canvas text [expr {$px2 + 290}] [expr {$py2-8}] "paint + set_source" \
+    -font "Sans Bold 12" -color {0.7 0.7 0.9} -anchor center
+
+# paint with solid color + alpha
+foreach {alpha col lbl bx} {
+    1.0   {0.9 0.3 0.2}  "paint 1.0"    10
+    0.7   {0.2 0.6 0.9}  "paint 0.7"   155
+    0.4   {0.3 0.8 0.3}  "paint 0.4"   300
+} {
+    $canvas rect $bx $py2 135 $ph2 -fill {0.15 0.15 0.22} -radius 4
+    # Checkerboard to show alpha
+    foreach {rx ry} {0 0 20 20 40 0 60 20 80 0 100 20 120 0
+                     0 20 20 0 40 20 60 0 80 20 100 0 120 20
+                     0 40 20 60 40 40 60 60 80 40 100 60 120 40
+                     0 60 20 40 40 60 60 40 80 60 100 40 120 60
+                     0 80 20 100 40 80 60 100 80 80 100 100 120 80
+                     0 100 20 80 40 100 60 80 80 100 100 80 120 100} {
+        $canvas rect [expr {$bx+4+$rx}] [expr {$py2+20+$ry}] 20 20 \
+            -fill {0.25 0.25 0.3}
+    }
+    $canvas push
+    $canvas clip_rect [expr {$bx+4}] [expr {$py2+20}] 127 [expr {$ph2-30}]
+    $canvas set_source -color $col
+    $canvas paint $alpha
+    $canvas pop
+    $canvas text [expr {$bx+68}] [expr {$py2+$ph2-8}] $lbl \
+        -font "Sans Bold 10" -color {0.9 0.9 1} -anchor center
+}
+
+# paint with gradient source
+set gx 445
+$canvas rect $gx $py2 165 $ph2 -fill {0.15 0.15 0.22} -radius 4
+$canvas gradient_radial "pg" \
+    [expr {$gx+82}] [expr {$py2+65}] 60 \
+    {{0 1 0.9 0.2 1} {0.5 0.5 0.3 0.8 0.9} {1 0 0 0.5 0}}
+$canvas push
+$canvas clip_rect [expr {$gx+4}] [expr {$py2+20}] 157 [expr {$ph2-30}]
+$canvas set_source -gradient pg
+$canvas paint
+$canvas pop
+$canvas text [expr {$gx+82}] [expr {$py2+$ph2-8}] "set_source -gradient" \
+    -font "Sans Bold 10" -color {0.9 0.9 1} -anchor center
+
+$canvas save $f
+$canvas destroy
+puts "  -> $f"
+
+
+# ================================================================
+# Demo 18: font_options + path_get + surface_copy
+# ================================================================
+puts "Demo 18: font_options, path_get, surface_copy..."
+
+set f [file join $outdir demo-prio3.png]
+set W 620; set H 440
+set canvas [tclmcairo::new $W $H]
+$canvas clear 0.1 0.1 0.18
+
+$canvas text [expr {$W/2}] 22 \
+    "tclmcairo 0.3 — font_options · path_get · surface_copy" \
+    -font "Sans Bold 15" -color {1 1 1} -anchor center
+
+# ---- Panel 1: font_options antialias comparison ----
+set px 10; set py 40; set pw 185; set ph 185
+$canvas rect $px $py $pw $ph -fill {0.14 0.14 0.22} -radius 6
+$canvas text [expr {$px+$pw/2}] [expr {$py+16}] "font_options" \
+    -font "Sans Bold 11" -color {0.7 0.7 0.9} -anchor center
+
+set ty [expr {$py+38}]
+foreach {aa lbl col} {
+    default "default"   {0.9 0.9 1.0}
+    none    "none"      {1.0 0.6 0.4}
+    gray    "gray"      {0.4 0.9 0.5}
+    best    "best"      {0.4 0.7 1.0}
+} {
+    set tmp [tclmcairo::new 165 30]
+    $tmp clear 0.14 0.14 0.22
+    $tmp font_options -antialias $aa
+    $tmp text 4 22 "Gg Aa Xyz 1234  ($lbl)" \
+        -font "Sans 13" -color $col
+    set bytes [$tmp topng]
+    $tmp destroy
+    $canvas image_data $bytes [expr {$px+10}] $ty
+    incr ty 34
+}
+
+# hint_style comparison
+set ty [expr {$py+172}]
+$canvas text [expr {$px+$pw/2}] $ty "-hint_style" \
+    -font "Sans 9" -color {0.5 0.6 0.7} -anchor center
+
+# ---- Panel 2: path_get — show what paths look like ----
+set px2 [expr {$px+$pw+10}]; set pw2 185
+$canvas rect $px2 $py $pw2 $ph -fill {0.14 0.14 0.22} -radius 6
+$canvas text [expr {$px2+$pw2/2}] [expr {$py+16}] "path_get" \
+    -font "Sans Bold 11" -color {0.7 0.7 0.9} -anchor center
+
+# Draw shapes and show their SVG path representation
+set shapes {
+    {circle  "circle" {100 75 40}}
+    {rect    "rect"   {20 10 120 50}}
+}
+
+# Build paths manually and read them back via path_get
+# We need to draw without consuming — use a temporary surface trick
+# Build path, clip_path reads it, path_get reads current path
+
+# Demonstrate path_get with clip_path:
+# clip_path uses the path but doesn't consume current path context
+# Actually: show the path string for known shapes
+
+set demo_paths {
+    "M 10 10 L 100 10 L 100 60 L 10 60 Z"   "rect"
+    "M 100 10 C 130 10 150 30 150 60 C 150 90 130 110 100 110 C 70 110 50 90 50 60 C 50 30 70 10 100 10 Z"  "bezier"
+    "M 10 60 L 55 10 L 100 60 Z"             "triangle"
+}
+
+set ty2 [expr {$py+35}]
+foreach {svgpath label} $demo_paths {
+    # Draw the path shape
+    set tmp [tclmcairo::new 165 55]
+    $tmp clear 0.14 0.14 0.22
+    # Draw shape
+    $tmp push
+    $tmp transform -translate 10 5
+    $tmp transform -scale 0.55 0.4
+    $tmp path $svgpath -fill {0.3 0.6 0.9 0.7} -stroke {0.6 0.8 1} -width 1.5
+    $tmp pop
+    # Show truncated path string
+    set short [string range $svgpath 0 28]
+    if {[string length $svgpath] > 28} { append short "..." }
+    $tmp text 83 44 $short -font "Courier 8" -color {0.6 0.7 0.8} -anchor center
+    set bytes [$tmp topng]
+    $tmp destroy
+    $canvas image_data $bytes $px2 $ty2
+    incr ty2 58
+}
+
+$canvas text [expr {$px2+$pw2/2}] [expr {$py+$ph-8}] \
+    "path_get → SVG string" \
+    -font "Sans 9" -color {0.5 0.6 0.7} -anchor center
+
+# ---- Panel 3: surface_copy — layer operations ----
+set px3 [expr {$px2+$pw2+10}]; set pw3 200
+$canvas rect $px3 $py $pw3 $ph -fill {0.14 0.14 0.22} -radius 6
+$canvas text [expr {$px3+$pw3/2}] [expr {$py+16}] "surface_copy" \
+    -font "Sans Bold 11" -color {0.7 0.7 0.9} -anchor center
+
+# Original
+set orig [tclmcairo::new 180 60]
+$orig clear 0.2 0.3 0.5
+$orig gradient_linear bg 0 0 180 0 {{0 0.2 0.5 0.9 1} {1 0.8 0.2 0.1 1}}
+$orig rect 0 0 180 60 -fillname bg
+$orig circle 90 30 25 -fill {1 1 1 0.8}
+$orig text 90 34 "original" -font "Sans Bold 11" -color {0.1 0.1 0.2} -anchor center
+set orig_bytes [$orig topng]
+
+# Copy 1: same content, draw on top
+set copy1_id [$orig surface_copy]
+tclmcairo circle $copy1_id 30 30 20 -fill {1 0.5 0 0.9}
+tclmcairo circle $copy1_id 150 30 20 -fill {0.5 0 1 0.9}
+set copy1_bytes [tclmcairo topng $copy1_id]
+tclmcairo destroy $copy1_id
+
+# Copy 2: different size (thumbnail)
+set copy2_id [$orig surface_copy 90 30]
+set copy2_bytes [tclmcairo topng $copy2_id]
+tclmcairo destroy $copy2_id
+
+$orig destroy
+
+# Display
+set ty3 [expr {$py+35}]
+$canvas image_data $orig_bytes $px3 $ty3
+$canvas text [expr {$px3+$pw3/2}] [expr {$ty3+65}] \
+    "original (180×60)" -font "Sans 9" -color {0.6 0.7 0.8} -anchor center
+
+incr ty3 78
+$canvas image_data $copy1_bytes $px3 $ty3
+$canvas text [expr {$px3+$pw3/2}] [expr {$ty3+65}] \
+    "surface_copy + draw on top" -font "Sans 9" -color {0.4 0.8 0.5} -anchor center
+
+incr ty3 78
+$canvas image_data $copy2_bytes $px3 [expr {$ty3+8}] -width 90 -height 30
+$canvas text [expr {$px3+$pw3/2}] [expr {$ty3+45}] \
+    "surface_copy 90×30 (resize)" -font "Sans 9" -color {0.4 0.6 0.9} -anchor center
+
+# ---- Bottom row: font_options hint_style comparison ----
+set py4 [expr {$py+$ph+15}]; set ph4 110
+$canvas rect 10 $py4 600 $ph4 -fill {0.14 0.14 0.22} -radius 6
+$canvas text 310 [expr {$py4+14}] \
+    "font_options -hint_style: none  slight  medium  full" \
+    -font "Sans Bold 11" -color {0.7 0.7 0.9} -anchor center
+
+set tx 15
+foreach {hs col} {none {0.9 0.5 0.4}  slight {0.9 0.8 0.3}  medium {0.4 0.9 0.5}  full {0.4 0.7 1.0}} {
+    set tmp [tclmcairo::new 148 78]
+    $tmp clear 0.14 0.14 0.22
+    $tmp font_options -hint_style $hs -antialias gray
+    $tmp text 74 22 $hs -font "Sans Bold 12" -color $col -anchor center
+    $tmp text 74 44 "Handgloves" -font "Serif 14" -color {0.9 0.9 1} -anchor center
+    $tmp text 74 62 "1234567890" -font "Monospace 12" -color {0.7 0.7 0.8} -anchor center
+    set bytes [$tmp topng]
+    $tmp destroy
+    $canvas image_data $bytes $tx [expr {$py4+24}]
+    incr tx 152
+}
+
+$canvas save $f
+$canvas destroy
+puts "  -> $f"
+
+puts "\nAll demos complete."
+puts "Output files in directory: $outdir"

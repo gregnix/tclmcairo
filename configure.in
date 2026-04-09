@@ -19,7 +19,7 @@
 #   ./configure --with-tcl=/usr/lib/tcl8.6 --disable-jpeg
 #-----------------------------------------------------------------------
 
-AC_INIT([tclmcairo], [0.2])
+AC_INIT([tclmcairo], [0.3])
 
 TEA_INIT([3.9])
 
@@ -113,7 +113,7 @@ TEA_ADD_INCLUDES([])
 TEA_ADD_LIBS([-lm])
 TEA_ADD_CFLAGS([])
 TEA_ADD_STUB_SOURCES([])
-TEA_ADD_TCL_SOURCES([tcl/tclmcairo-0.2.tm])
+TEA_ADD_TCL_SOURCES([tcl/tclmcairo-0.3.tm])
 
 #--------------------------------------------------------------------
 # Tcl Public Headers

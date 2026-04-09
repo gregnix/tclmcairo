@@ -1,3 +1,112 @@
+
+---
+
+## v0.3 (2026-04-09)
+
+### New Features
+
+**`operator`** — compositing operator (Porter-Duff + blend modes):
+```tcl
+$ctx operator OVER        ;# default
+$ctx operator MULTIPLY    ;# photo multiply blend
+$ctx operator SCREEN      ;# screen blend
+$ctx operator XOR         ;# exclusive or
+$ctx operator DIFFERENCE  ;# difference
+$ctx operator DARKEN      ;# darken
+$ctx operator LIGHTEN     ;# lighten
+# + SOURCE CLEAR IN OUT ATOP DEST DEST_OVER DEST_IN DEST_OUT
+#   DEST_ATOP ADD SATURATE OVERLAY COLOR_DODGE COLOR_BURN
+#   HARD_LIGHT SOFT_LIGHT EXCLUSION HSL_HUE HSL_SATURATION
+#   HSL_COLOR HSL_LUMINOSITY
+```
+
+**`-dash_offset`** — starting offset into dash pattern:
+```tcl
+$ctx line 0 0 400 0 -dash {10 5} -dash_offset 3
+$ctx path "M 10 10 ..." -stroke {1 0 0} -dash {8 4} -dash_offset 0
+```
+
+**`arc_negative`** — arc counter-clockwise:
+```tcl
+$ctx arc_negative cx cy r start_deg end_deg ?opts?
+```
+
+**`user_to_device`** / **`device_to_user`** — coordinate mapping:
+```tcl
+set d [$ctx user_to_device 10 20]   ;# -> {dx dy}
+set u [$ctx device_to_user 60 70]   ;# -> {x y}
+# Essential for mouse interaction under active transforms
+```
+
+**`recording_bbox`** — ink bounding box of vector context:
+```tcl
+set bb [$ctx recording_bbox]   ;# -> {x y w h}
+# Only valid on -mode vector contexts
+```
+
+**`font_options`** — font rendering quality:
+```tcl
+$ctx font_options -antialias default|none|gray|subpixel|fast|good|best
+$ctx font_options -hint_style default|none|slight|medium|full
+$ctx font_options -hint_metrics default|on|off
+set fo [$ctx font_options]   ;# -> {-antialias gray -hint_style full ...}
+```
+
+**`path_get`** — read current Cairo path as SVG string:
+```tcl
+$ctx path "M 10 10 L 100 50"   ;# path is consumed after stroke/fill
+# Use path_get before draw commands:
+set svg [$ctx path_get]   ;# -> "M 10 10 L 100 50" or ""
+```
+
+**`surface_copy`** — new blank context same type/format:
+```tcl
+set cid [$ctx surface_copy]          ;# same size
+set cid [$ctx surface_copy 400 300]  ;# custom size
+tclmcairo circle $cid 100 75 60 -fill {1 0.5 0}
+tclmcairo save $cid output.png
+tclmcairo destroy $cid
+```
+
+**`gradient_extend`** — repeat/reflect/pad/none:
+```tcl
+$ctx gradient_linear g 0 0 50 0 {{0 1 0 0 1} {1 0 1 0 1}}
+$ctx gradient_extend g repeat   ;# tile the gradient
+$ctx rect 0 0 400 300 -fillname g
+```
+
+**`gradient_filter`** — interpolation quality:
+```tcl
+$ctx gradient_filter g best|good|fast|nearest|bilinear
+```
+
+**`paint`** — fill entire surface with current source:
+```tcl
+$ctx set_source -color {0.2 0.5 0.8}
+$ctx paint            ;# full opacity
+$ctx paint 0.4        ;# with alpha
+$ctx set_source -gradient mygrad
+$ctx paint
+```
+
+**`set_source`** — set source without drawing:
+```tcl
+$ctx set_source -color {r g b ?a?}
+$ctx set_source -gradient name
+```
+
+
+### Build
+
+- `PACKAGE_VERSION`: `0.3`
+- `.tm`: `tclmcairo-0.3.tm`
+
+### Test Results
+
+| Platform | Tcl | Tests |
+|----------|-----|-------|
+| Linux Debian | 8.6.17 | 123/123 |
+
 # tclmcairo Changelog
 
 ## v0.2 (2026-04-08)
@@ -110,6 +219,34 @@ $ctx path "M 150 30 ..." -fill {0.2 0.4 0.9} -fillrule evenodd
 - `tclmcairo create` accepts `-svg_version 1.1|1.2` and `-svg_unit pt|px|...`
 - `destroy` auto-calls `surface_finish` for file-mode if not already done
 
+**`gradient_extend`** — repeat/reflect/pad/none:
+```tcl
+$ctx gradient_linear g 0 0 50 0 {{0 1 0 0 1} {1 0 1 0 1}}
+$ctx gradient_extend g repeat   ;# tile the gradient
+$ctx rect 0 0 400 300 -fillname g
+```
+
+**`gradient_filter`** — interpolation quality:
+```tcl
+$ctx gradient_filter g best|good|fast|nearest|bilinear
+```
+
+**`paint`** — fill entire surface with current source:
+```tcl
+$ctx set_source -color {0.2 0.5 0.8}
+$ctx paint            ;# full opacity
+$ctx paint 0.4        ;# with alpha
+$ctx set_source -gradient mygrad
+$ctx paint
+```
+
+**`set_source`** — set source without drawing:
+```tcl
+$ctx set_source -color {r g b ?a?}
+$ctx set_source -gradient name
+```
+
+
 ### Build
 
 - `Makefile` / `Makefile.win`: JPEG auto-detected (checks for `jpeglib.h`),
@@ -159,6 +296,34 @@ First release. Fully tested on all supported platforms.
 - `line` color alpha: same fix applied
 - All `strncpy` calls: explicit null-terminator added
 - Gradient name buffer: null-terminator added
+
+**`gradient_extend`** — repeat/reflect/pad/none:
+```tcl
+$ctx gradient_linear g 0 0 50 0 {{0 1 0 0 1} {1 0 1 0 1}}
+$ctx gradient_extend g repeat   ;# tile the gradient
+$ctx rect 0 0 400 300 -fillname g
+```
+
+**`gradient_filter`** — interpolation quality:
+```tcl
+$ctx gradient_filter g best|good|fast|nearest|bilinear
+```
+
+**`paint`** — fill entire surface with current source:
+```tcl
+$ctx set_source -color {0.2 0.5 0.8}
+$ctx paint            ;# full opacity
+$ctx paint 0.4        ;# with alpha
+$ctx set_source -gradient mygrad
+$ctx paint
+```
+
+**`set_source`** — set source without drawing:
+```tcl
+$ctx set_source -color {r g b ?a?}
+$ctx set_source -gradient name
+```
+
 
 ### Build
 

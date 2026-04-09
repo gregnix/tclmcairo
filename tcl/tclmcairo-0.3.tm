@@ -44,7 +44,7 @@
 #
 #   $ctx destroy
 
-package provide tclmcairo 0.2
+package provide tclmcairo 0.3
 
 namespace eval ::tclmcairo {
     variable _libloaded 0
@@ -71,6 +71,11 @@ namespace eval ::tclmcairo {
             [pwd] \
             [file join [pwd] lib] \
         ]
+        # Windows: also try parent of cwd (common when running from subdir)
+        if {$::tcl_platform(platform) eq "windows"} {
+            lappend dirs [file join [pwd] ..]
+            lappend dirs [file dirname [info script]]
+        }
         if {[info exists ::env(TCLMCAIRO_LIBDIR)]} {
             set dirs [linsert $dirs 0 $::env(TCLMCAIRO_LIBDIR)]
         }
@@ -98,11 +103,12 @@ namespace eval ::tclmcairo {
         # Collect what was found for diagnostics
         set found {}
         foreach d $dirs {
-            foreach p [glob -nocomplain -directory $d {libtclmcairo*}] {
+            foreach p [glob -nocomplain -directory $d {libtclmcairo*} {tclmcairo.dll}] {
                 if {[file isfile $p]} { lappend found [file normalize $p] }
             }
         }
-        set msg "libtclmcairo.so not found (searched: [join $dirs {, }])"
+        set libname [expr {$::tcl_platform(platform) eq "windows" ? "tclmcairo.dll" : "libtclmcairo.so"}]
+        set msg "$libname not found (searched: [join $dirs {, }])"
         if {[llength $found]} {
             append msg "\nFiles found but not loadable: [join $found {, }]"
         }
@@ -209,4 +215,54 @@ oo::define tclmcairo::context {
     method topng    {}                       { tclmcairo topng       $_id }
     # PNG aus Bytearray zeichnen
     method image_data {bytes x y args}       { tclmcairo image_data  $_id $bytes $x $y {*}$args }
+}
+
+oo::define tclmcairo::context {
+    # -- 0.3 features --
+    method operator      {name}           { tclmcairo operator       $_id $name }
+    method user_to_device {x y}           { tclmcairo user_to_device $_id $x $y }
+    method device_to_user {dx dy}         { tclmcairo device_to_user $_id $dx $dy }
+    method arc_negative  {cx cy r s e args} { tclmcairo arc_negative $_id $cx $cy $r $s $e {*}$args }
+    method recording_bbox {}              { tclmcairo recording_bbox $_id }
+}
+
+oo::define tclmcairo::context {
+    # -- 0.3 Prio-2 features --
+    method gradient_extend {name ext}  { tclmcairo gradient_extend $_id $name $ext }
+    method gradient_filter {name flt}  { tclmcairo gradient_filter $_id $name $flt }
+    method paint           {args}      { tclmcairo paint      $_id {*}$args }
+    method set_source      {args}      { tclmcairo set_source $_id {*}$args }
+}
+
+oo::define tclmcairo::context {
+    # -- 0.3 Prio-3 features --
+    method font_options  {args}      { tclmcairo font_options  $_id {*}$args }
+    method path_get      {}          { tclmcairo path_get      $_id }
+    # surface_copy: returns new raw C context id (not a TclOO object)
+    # Use: set copy [tclmcairo::new ...] then tclmcairo surface_copy $id
+    # Or directly: tclmcairo surface_copy [$ctx id] ?w h?
+    method surface_copy  {args}      { tclmcairo surface_copy $_id {*}$args }
+}
+
+oo::define tclmcairo::context {
+    # -- Low-level path commands (Cairo samples API) --
+    method move_to       {x y}               { tclmcairo move_to      $_id $x $y }
+    method line_to       {x y}               { tclmcairo line_to      $_id $x $y }
+    method rel_move_to   {dx dy}             { tclmcairo rel_move_to  $_id $dx $dy }
+    method rel_line_to   {dx dy}             { tclmcairo rel_line_to  $_id $dx $dy }
+    method curve_to      {x1 y1 x2 y2 x3 y3} { tclmcairo curve_to   $_id $x1 $y1 $x2 $y2 $x3 $y3 }
+    method rel_curve_to  {x1 y1 x2 y2 x3 y3} { tclmcairo rel_curve_to $_id $x1 $y1 $x2 $y2 $x3 $y3 }
+    method close_path    {}                  { tclmcairo close_path   $_id }
+    method new_path      {}                  { tclmcairo new_path     $_id }
+    method new_sub_path  {}                  { tclmcairo new_sub_path $_id }
+    method stroke        {}                  { tclmcairo stroke       $_id }
+    method fill          {}                  { tclmcairo fill         $_id }
+    method fill_preserve {}                  { tclmcairo fill_preserve   $_id }
+    method stroke_preserve {}               { tclmcairo stroke_preserve $_id }
+    method set_line_width {w}               { tclmcairo set_line_width $_id $w }
+    method set_line_cap   {cap}             { tclmcairo set_line_cap   $_id $cap }
+    method set_line_join  {join}            { tclmcairo set_line_join  $_id $join }
+    method set_fill_rule  {rule}            { tclmcairo set_fill_rule  $_id $rule }
+    method set_source_rgba {r g b a}        { tclmcairo set_source_rgba $_id $r $g $b $a }
+    method set_source_rgb  {r g b}          { tclmcairo set_source_rgb  $_id $r $g $b }
 }

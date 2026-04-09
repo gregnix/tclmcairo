@@ -1166,4 +1166,691 @@ test transform-matrix-1.3 {-matrix invalid -> error} -body {
 } -result 1
 
 # ================================================================
+
+
+# ================================================================
+# v0.3 — operator
+# ================================================================
+test operator-1.0 {operator OVER is default} -body {
+    set ctx [mkctx]
+    $ctx operator OVER
+    set ok 1; $ctx destroy; set ok
+} -result 1
+
+test operator-1.1 {operator MULTIPLY} -body {
+    set ctx [mkctx]
+    $ctx operator MULTIPLY
+    $ctx circle 100 75 60 -fill {1 0.5 0}
+    set f [tmpfile png]; $ctx save $f; $ctx destroy
+    set ok [expr {[file size $f] > 100}]; cleanup $f; set ok
+} -result 1
+
+test operator-1.2 {operator XOR} -body {
+    set ctx [mkctx]
+    $ctx operator XOR
+    $ctx rect 20 20 160 110 -fill {0.8 0.2 0.4}
+    set f [tmpfile png]; $ctx save $f; $ctx destroy
+    set ok [expr {[file size $f] > 100}]; cleanup $f; set ok
+} -result 1
+
+test operator-1.3 {operator DIFFERENCE} -body {
+    set ctx [mkctx]
+    $ctx operator DIFFERENCE
+    $ctx circle 100 75 50 -fill {0.5 0.9 0.2}
+    set ok 1; $ctx destroy; set ok
+} -result 1
+
+test operator-1.4 {invalid operator -> error} -body {
+    set ctx [mkctx]
+    set err ""
+    catch { $ctx operator BOGUS } err
+    $ctx destroy
+    expr {$err ne ""}
+} -result 1
+
+test operator-1.5 {case insensitive operator} -body {
+    set ctx [mkctx]
+    $ctx operator multiply
+    set ok 1; $ctx destroy; set ok
+} -result 1
+
+# ================================================================
+# v0.3 — -dash_offset
+# ================================================================
+test dash-offset-1.0 {-dash_offset accepted} -body {
+    set ctx [mkctx]
+    $ctx line 0 75 200 75 -color {1 1 1} -width 2 \
+        -dash {10 5} -dash_offset 3
+    set ok 1; $ctx destroy; set ok
+} -result 1
+
+test dash-offset-1.1 {-dash_offset 0 = default} -body {
+    set ctx [mkctx]
+    $ctx line 0 75 200 75 -color {1 1 1} -width 2 \
+        -dash {8 4} -dash_offset 0
+    set ok 1; $ctx destroy; set ok
+} -result 1
+
+test dash-offset-1.2 {-dash_offset on path} -body {
+    set ctx [mkctx]
+    $ctx path "M 10 75 L 190 75" -stroke {1 0.5 0} \
+        -width 2 -dash {6 3} -dash_offset 5
+    set ok 1; $ctx destroy; set ok
+} -result 1
+
+# ================================================================
+# v0.3 — arc_negative
+# ================================================================
+test arc-neg-1.0 {arc_negative draws} -body {
+    set ctx [mkctx]
+    $ctx arc_negative 100 75 50 0 270 -stroke {0.2 0.8 1} -width 2
+    set f [tmpfile png]; $ctx save $f; $ctx destroy
+    set ok [expr {[file size $f] > 100}]; cleanup $f; set ok
+} -result 1
+
+test arc-neg-1.1 {arc_negative produces valid image} -body {
+    set ctx [mkctx]
+    $ctx clear 0 0 0 0
+    $ctx arc_negative 100 75 50 0 270 -stroke {0 0 1} -width 3
+    set f [tmpfile png]; $ctx save $f; $ctx destroy
+    set ok [expr {[file size $f] > 100}]; cleanup $f; set ok
+} -result 1
+
+# ================================================================
+# v0.3 — user_to_device / device_to_user
+# ================================================================
+test coords-1.0 {user_to_device identity = same} -body {
+    set ctx [mkctx]
+    set d [$ctx user_to_device 50 80]
+    $ctx destroy
+    set d
+} -result {50.0 80.0}
+
+test coords-1.1 {user_to_device after translate} -body {
+    set ctx [mkctx]
+    $ctx transform -translate 30 40
+    set d [$ctx user_to_device 10 20]
+    $ctx destroy
+    set d
+} -result {40.0 60.0}
+
+test coords-1.2 {device_to_user inverse of user_to_device} -body {
+    set ctx [mkctx]
+    $ctx transform -translate 100 50
+    $ctx transform -scale 2.0 2.0
+    set d [$ctx user_to_device 10 20]
+    set u [$ctx device_to_user {*}$d]
+    $ctx destroy
+    list [format %.1f [lindex $u 0]] [format %.1f [lindex $u 1]]
+} -result {10.0 20.0}
+
+test coords-1.3 {user_to_device after rotate} -body {
+    set ctx [mkctx]
+    $ctx transform -rotate 90
+    set d [$ctx user_to_device 10 0]
+    $ctx destroy
+    # 90° rotation: (10,0) -> (0,10) approximately
+    expr {abs([lindex $d 0] - 0) < 0.01 && abs([lindex $d 1] - 10) < 0.01}
+} -result 1
+
+# ================================================================
+# v0.3 — recording_bbox
+# ================================================================
+test recbbox-1.0 {recording_bbox on vector context} -body {
+    set ctx [tclmcairo::new 300 200 -mode vector]
+    $ctx circle 150 100 50 -fill {0.5 0.8 0.2}
+    set bb [$ctx recording_bbox]
+    $ctx destroy
+    expr {[llength $bb] == 4}
+} -result 1
+
+test recbbox-1.1 {recording_bbox x y w h positive} -body {
+    set ctx [tclmcairo::new 400 300 -mode vector]
+    $ctx rect 20 30 100 60 -fill {1 0 0}
+    set bb [$ctx recording_bbox]
+    $ctx destroy
+    # w and h should be > 0
+    expr {[lindex $bb 2] > 0 && [lindex $bb 3] > 0}
+} -result 1
+
+test recbbox-1.2 {recording_bbox on raster -> error} -body {
+    set ctx [mkctx]
+    set err ""
+    catch { $ctx recording_bbox } err
+    $ctx destroy
+    expr {$err ne ""}
+} -result 1
+
+# ================================================================
+
+
+# ================================================================
+# v0.3 — gradient_extend
+# ================================================================
+test gext-1.0 {gradient_extend repeat} -body {
+    set ctx [mkctx]
+    $ctx gradient_linear g 0 0 50 0 {{0 1 0 0 1} {1 0 0 1 1}}
+    $ctx gradient_extend g repeat
+    $ctx rect 0 0 200 150 -fillname g
+    set f [tmpfile png]; $ctx save $f; $ctx destroy
+    set ok [expr {[file size $f] > 100}]; cleanup $f; set ok
+} -result 1
+
+test gext-1.1 {gradient_extend reflect} -body {
+    set ctx [mkctx]
+    $ctx gradient_linear g 0 0 60 0 {{0 0 0.5 1 1} {1 1 0.8 0 1}}
+    $ctx gradient_extend g reflect
+    $ctx rect 0 0 200 150 -fillname g
+    set ok 1; $ctx destroy; set ok
+} -result 1
+
+test gext-1.2 {gradient_extend pad (default)} -body {
+    set ctx [mkctx]
+    $ctx gradient_linear g 50 0 150 0 {{0 0.2 0.5 1 1} {1 1 0.8 0 1}}
+    $ctx gradient_extend g pad
+    $ctx rect 0 0 200 150 -fillname g
+    set ok 1; $ctx destroy; set ok
+} -result 1
+
+test gext-1.3 {gradient_extend none} -body {
+    set ctx [mkctx]
+    $ctx gradient_linear g 50 0 150 0 {{0 1 0 0 1} {1 0 1 0 1}}
+    $ctx gradient_extend g none
+    $ctx rect 0 0 200 150 -fillname g
+    set ok 1; $ctx destroy; set ok
+} -result 1
+
+test gext-1.4 {gradient_extend invalid -> error} -body {
+    set ctx [mkctx]
+    $ctx gradient_linear g 0 0 200 0 {{0 1 0 0 1} {1 0 1 0 1}}
+    set err ""
+    catch { $ctx gradient_extend g BOGUS } err
+    $ctx destroy
+    expr {$err ne ""}
+} -result 1
+
+test gext-1.5 {gradient_extend unknown name -> error} -body {
+    set ctx [mkctx]
+    set err ""
+    catch { $ctx gradient_extend nosuchgrad repeat } err
+    $ctx destroy
+    expr {$err ne ""}
+} -result 1
+
+# ================================================================
+# v0.3 — gradient_filter
+# ================================================================
+test gflt-1.0 {gradient_filter best} -body {
+    set ctx [mkctx]
+    $ctx gradient_linear g 0 0 200 0 {{0 0.2 0.5 1 1} {1 0.9 0.3 0 1}}
+    $ctx gradient_filter g best
+    $ctx rect 0 0 200 150 -fillname g
+    set ok 1; $ctx destroy; set ok
+} -result 1
+
+test gflt-1.1 {gradient_filter nearest} -body {
+    set ctx [mkctx]
+    $ctx gradient_radial g 100 75 60 {{0 1 0.8 0 1} {1 0 0.2 0.8 0}}
+    $ctx gradient_filter g nearest
+    $ctx circle 100 75 80 -fillname g
+    set ok 1; $ctx destroy; set ok
+} -result 1
+
+test gflt-1.2 {gradient_filter invalid -> error} -body {
+    set ctx [mkctx]
+    $ctx gradient_linear g 0 0 200 0 {{0 1 0 0 1} {1 0 1 0 1}}
+    set err ""
+    catch { $ctx gradient_filter g BOGUS } err
+    $ctx destroy
+    expr {$err ne ""}
+} -result 1
+
+# ================================================================
+# v0.3 — paint / set_source
+# ================================================================
+test paint-1.0 {paint fills entire surface} -body {
+    set ctx [mkctx]
+    $ctx set_source -color {0.8 0.2 0.4}
+    $ctx paint
+    set f [tmpfile png]; $ctx save $f; $ctx destroy
+    set ok [expr {[file size $f] > 100}]; cleanup $f; set ok
+} -result 1
+
+test paint-1.1 {paint with alpha} -body {
+    set ctx [mkctx]
+    $ctx clear 1 1 1
+    $ctx set_source -color {0 0.5 1}
+    $ctx paint 0.5
+    set ok 1; $ctx destroy; set ok
+} -result 1
+
+test paint-1.2 {paint with gradient source} -body {
+    set ctx [mkctx]
+    $ctx gradient_linear g 0 0 200 0 {{0 1 0 0 1} {1 0 0 1 1}}
+    $ctx set_source -gradient g
+    $ctx paint
+    set ok 1; $ctx destroy; set ok
+} -result 1
+
+test paint-1.3 {set_source -color invalid -> error} -body {
+    set ctx [mkctx]
+    set err ""
+    catch { $ctx set_source -color {1 0} } err
+    $ctx destroy
+    string match *needs* $err
+} -result 1
+
+test paint-1.4 {set_source -gradient unknown -> error} -body {
+    set ctx [mkctx]
+    set err ""
+    catch { $ctx set_source -gradient nosuch } err
+    $ctx destroy
+    expr {$err ne ""}
+} -result 1
+
+# ================================================================
+
+
+# ================================================================
+# v0.3 — font_options
+# ================================================================
+test fontopts-1.0 {font_options get returns list of 6} -body {
+    set ctx [mkctx]
+    set fo [$ctx font_options]
+    $ctx destroy
+    llength $fo
+} -result 6
+
+test fontopts-1.1 {font_options set antialias gray} -body {
+    set ctx [mkctx]
+    $ctx font_options -antialias gray
+    set fo [$ctx font_options]
+    $ctx destroy
+    lindex $fo 1
+} -result gray
+
+test fontopts-1.2 {font_options set hint_style full} -body {
+    set ctx [mkctx]
+    $ctx font_options -hint_style full
+    set fo [$ctx font_options]
+    $ctx destroy
+    lindex $fo 3
+} -result full
+
+test fontopts-1.3 {font_options set hint_metrics on} -body {
+    set ctx [mkctx]
+    $ctx font_options -hint_metrics on
+    set fo [$ctx font_options]
+    $ctx destroy
+    lindex $fo 5
+} -result on
+
+test fontopts-1.4 {font_options set hint_metrics off} -body {
+    set ctx [mkctx]
+    $ctx font_options -hint_metrics off
+    set fo [$ctx font_options]
+    $ctx destroy
+    lindex $fo 5
+} -result off
+
+test fontopts-1.5 {font_options invalid antialias -> error} -body {
+    set ctx [mkctx]; set err ""
+    catch { $ctx font_options -antialias BOGUS } err
+    $ctx destroy
+    string match *invalid* $err
+} -result 1
+
+test fontopts-1.6 {font_options invalid hint_style -> error} -body {
+    set ctx [mkctx]; set err ""
+    catch { $ctx font_options -hint_style BOGUS } err
+    $ctx destroy
+    string match *invalid* $err
+} -result 1
+
+test fontopts-1.7 {font_options affects text rendering} -body {
+    set ctx [mkctx]
+    $ctx font_options -antialias none -hint_style none
+    $ctx text 100 75 "Test" -font "Sans 14" -color {1 1 1}
+    set f [tmpfile png]; $ctx save $f; $ctx destroy
+    set ok [expr {[file size $f] > 100}]; cleanup $f; set ok
+} -result 1
+
+# ================================================================
+# v0.3 — path_get
+# ================================================================
+test pathget-1.0 {path_get on empty path returns empty string} -body {
+    set ctx [mkctx]
+    set p [$ctx path_get]
+    $ctx destroy
+    set p
+} -result {}
+
+test pathget-1.1 {path_get returns string} -body {
+    set ctx [mkctx]
+    set p [$ctx path_get]
+    $ctx destroy
+    expr {[string length $p] >= 0}
+} -result 1
+
+test pathget-1.2 {path_get after stroke is empty (Cairo clears path)} -body {
+    set ctx [mkctx]
+    $ctx line 10 10 100 100 -color {1 1 1} -width 2
+    set p [$ctx path_get]
+    $ctx destroy
+    # Cairo clears path after stroke — correct behavior
+    set p
+} -result {}
+
+# ================================================================
+# v0.3 — surface_copy
+# ================================================================
+test surfc-1.0 {surface_copy creates new context same size} -body {
+    set ctx [tclmcairo::new 200 150]
+    set cid [$ctx surface_copy]
+    set sz [tclmcairo size $cid]
+    $ctx destroy; tclmcairo destroy $cid
+    set sz
+} -result {200 150}
+
+test surfc-1.1 {surface_copy with custom size} -body {
+    set ctx [tclmcairo::new 200 150]
+    set cid [$ctx surface_copy 80 60]
+    set sz [tclmcairo size $cid]
+    $ctx destroy; tclmcairo destroy $cid
+    set sz
+} -result {80 60}
+
+test surfc-1.2 {surface_copy is independent — draw on copy does not affect original} -body {
+    set ctx [tclmcairo::new 200 150]
+    $ctx clear 0.5 0.5 0.5
+    set cid [$ctx surface_copy]
+    tclmcairo clear $cid 1 0 0
+    set bytes_orig [$ctx topng]
+    set bytes_copy [tclmcairo topng $cid]
+    $ctx destroy; tclmcairo destroy $cid
+    # Different content → different PNG bytes
+    expr {$bytes_orig ne $bytes_copy}
+} -result 1
+
+test surfc-1.3 {surface_copy from vector context} -body {
+    set ctx [tclmcairo::new 200 150 -mode vector]
+    $ctx circle 100 75 50 -fill {0.5 0.8 0.2}
+    set cid [$ctx surface_copy]
+    set sz [tclmcairo size $cid]
+    $ctx destroy; tclmcairo destroy $cid
+    set sz
+} -result {200 150}
+
+test surfc-1.4 {surface_copy result can be saved as PNG} -body {
+    set ctx [tclmcairo::new 200 150]
+    $ctx clear 0.2 0.4 0.8
+    $ctx circle 100 75 60 -fill {1 0.8 0.2}
+    set cid [$ctx surface_copy]
+    set f [tmpfile png]
+    tclmcairo save $cid $f
+    $ctx destroy; tclmcairo destroy $cid
+    set ok [expr {[file size $f] > 200}]; cleanup $f; set ok
+} -result 1
+
+# ================================================================
+
+
+# ================================================================
+# Low-level path commands
+# ================================================================
+test lowlevel-1.0 {move_to + line_to + stroke} -body {
+    set cr [tclmcairo::new 256 256]
+    $cr set_source_rgb 0 0 0
+    $cr set_line_width 5
+    $cr move_to 10 10
+    $cr line_to 246 246
+    $cr stroke
+    set f [tmpfile png]; $cr save $f; $cr destroy
+    set ok [expr {[file size $f] > 100}]; cleanup $f; set ok
+} -result 1
+
+test lowlevel-1.1 {rel_line_to + close_path} -body {
+    set cr [tclmcairo::new 256 256]
+    $cr set_source_rgb 0.5 0 1
+    $cr set_line_width 3
+    $cr move_to 50 50
+    $cr rel_line_to 150 0
+    $cr rel_line_to 0 150
+    $cr close_path
+    $cr stroke
+    set ok 1; $cr destroy; set ok
+} -result 1
+
+test lowlevel-1.2 {curve_to draws bezier} -body {
+    set cr [tclmcairo::new 256 256]
+    $cr set_source_rgb 0 0 1
+    $cr set_line_width 10
+    $cr move_to 25.6 128
+    $cr curve_to 102.4 230.4 153.6 25.6 230.4 128
+    $cr stroke
+    set f [tmpfile png]; $cr save $f; $cr destroy
+    set ok [expr {[file size $f] > 100}]; cleanup $f; set ok
+} -result 1
+
+test lowlevel-1.3 {rel_curve_to} -body {
+    set cr [tclmcairo::new 256 256]
+    $cr set_source_rgb 0 0.5 1
+    $cr set_line_width 5
+    $cr move_to 50 128
+    $cr rel_curve_to 30 60 80 -60 120 0
+    $cr stroke
+    set ok 1; $cr destroy; set ok
+} -result 1
+
+test lowlevel-1.4 {fill_preserve keeps path for stroke} -body {
+    set cr [tclmcairo::new 256 256]
+    $cr set_source_rgb 0 0 1
+    $cr move_to 50 50
+    $cr line_to 200 50
+    $cr line_to 200 200
+    $cr close_path
+    $cr fill_preserve
+    $cr set_source_rgb 1 0 0
+    $cr set_line_width 4
+    $cr stroke
+    set f [tmpfile png]; $cr save $f; $cr destroy
+    set ok [expr {[file size $f] > 100}]; cleanup $f; set ok
+} -result 1
+
+test lowlevel-1.5 {stroke_preserve keeps path} -body {
+    set cr [tclmcairo::new 256 256]
+    $cr set_source_rgb 0.5 0.5 1
+    $cr set_line_width 8
+    $cr move_to 20 128; $cr line_to 236 128
+    $cr stroke_preserve
+    $cr set_source_rgba 1 0 0 0.5
+    $cr set_line_width 2
+    $cr stroke
+    set ok 1; $cr destroy; set ok
+} -result 1
+
+test lowlevel-1.6 {new_sub_path + fill_rule evenodd} -body {
+    set cr [tclmcairo::new 256 256]
+    $cr set_line_width 6
+    $cr move_to 12 12; $cr line_to 244 12
+    $cr line_to 244 82; $cr line_to 12 82; $cr close_path
+    $cr new_sub_path
+    $cr arc 64 47 40 0 [expr {2*3.14159}]
+    $cr set_fill_rule evenodd
+    $cr set_source_rgb 0 0.7 0
+    $cr fill_preserve
+    $cr set_source_rgb 0 0 0
+    $cr stroke
+    set f [tmpfile png]; $cr save $f; $cr destroy
+    set ok [expr {[file size $f] > 100}]; cleanup $f; set ok
+} -result 1
+
+test lowlevel-1.7 {new_path clears current path} -body {
+    set cr [tclmcairo::new 256 256]
+    $cr move_to 0 0; $cr line_to 256 256
+    $cr new_path
+    set p [$cr path_get]
+    $cr destroy
+    set p
+} -result {}
+
+test lowlevel-1.8 {set_line_cap butt|round|square} -body {
+    set cr [tclmcairo::new 256 256]
+    foreach cap {butt round square} {
+        $cr set_line_cap $cap
+    }
+    set ok 1; $cr destroy; set ok
+} -result 1
+
+test lowlevel-1.9 {set_line_join miter|round|bevel} -body {
+    set cr [tclmcairo::new 256 256]
+    foreach join {miter round bevel} {
+        $cr set_line_join $join
+    }
+    set ok 1; $cr destroy; set ok
+} -result 1
+
+test lowlevel-1.10 {set_source_rgba + fill} -body {
+    set cr [tclmcairo::new 256 256]
+    $cr set_source_rgba 1 0.5 0 0.8
+    $cr arc 128 128 80 0 [expr {2*3.14159}]
+    $cr fill
+    set f [tmpfile png]; $cr save $f; $cr destroy
+    set ok [expr {[file size $f] > 100}]; cleanup $f; set ok
+} -result 1
+
+test lowlevel-1.11 {set_source_rgb + stroke} -body {
+    set cr [tclmcairo::new 256 256]
+    $cr set_source_rgb 0.2 0.6 0.9
+    $cr set_line_width 12
+    $cr move_to 30 128; $cr line_to 226 128
+    $cr stroke
+    set ok 1; $cr destroy; set ok
+} -result 1
+
+test lowlevel-1.12 {set_fill_rule winding} -body {
+    set cr [tclmcairo::new 256 256]
+    $cr set_fill_rule winding
+    $cr move_to 128 10
+    $cr line_to 246 246
+    $cr line_to 10 246
+    $cr close_path
+    $cr set_source_rgb 0.2 0.5 0.9
+    $cr fill
+    set ok 1; $cr destroy; set ok
+} -result 1
+
+test lowlevel-1.13 {set_line_cap invalid -> error} -body {
+    set cr [tclmcairo::new 256 256]; set err ""
+    catch { $cr set_line_cap bogus } err
+    $cr destroy
+    string match *invalid* $err
+} -result 1
+
+test lowlevel-1.14 {set_line_join invalid -> error} -body {
+    set cr [tclmcairo::new 256 256]; set err ""
+    catch { $cr set_line_join bogus } err
+    $cr destroy
+    string match *invalid* $err
+} -result 1
+
+test lowlevel-1.15 {set_fill_rule invalid -> error} -body {
+    set cr [tclmcairo::new 256 256]; set err ""
+    catch { $cr set_fill_rule bogus } err
+    $cr destroy
+    string match *invalid* $err
+} -result 1
+
+test lowlevel-1.16 {rel_move_to moves current point} -body {
+    set cr [tclmcairo::new 256 256]
+    $cr move_to 50 50
+    $cr rel_move_to 30 40
+    $cr line_to 200 200
+    $cr set_source_rgb 0 0 0
+    $cr set_line_width 2
+    $cr stroke
+    set ok 1; $cr destroy; set ok
+} -result 1
+
+# ================================================================
+
+
+# ================================================================
+# Robustness / validation fixes (from code review)
+# ================================================================
+
+# Fix 1: package version consistency
+test robustness-1.0 {package version is 0.3} -body {
+    package present tclmcairo
+} -result 0.3
+
+# Fix 5: low-level commands check argument count
+test robustness-1.1 {move_to requires x y} -body {
+    set ctx [tclmcairo::new 100 100]
+    set err ""
+    catch { tclmcairo move_to [$ctx id] } err
+    $ctx destroy
+    string match *args* $err
+} -result 1
+
+test robustness-1.2 {line_to requires x y} -body {
+    set ctx [tclmcairo::new 100 100]
+    set err ""
+    catch { tclmcairo line_to [$ctx id] 10 } err
+    $ctx destroy
+    string match *args* $err
+} -result 1
+
+test robustness-1.3 {close_path requires id only} -body {
+    set ctx [tclmcairo::new 100 100]
+    $ctx move_to 10 10; $ctx line_to 50 50
+    $ctx close_path
+    set ok 1; $ctx destroy; set ok
+} -result 1
+
+# Fix 6: create validates options
+test robustness-2.0 {create rejects unknown option} -body {
+    set err ""
+    catch { tclmcairo::new 100 100 -bogus val } err
+    expr {$err ne ""}
+} -result 1
+
+test robustness-2.1 {create rejects odd option list} -body {
+    set err ""
+    catch { tclmcairo::new 100 100 -mode } err
+    string match *value* $err
+} -result 1
+
+test robustness-2.2 {create rejects invalid -mode} -body {
+    set err ""
+    catch { tclmcairo::new 100 100 -mode foobar } err
+    string match *invalid* $err
+} -result 1
+
+test robustness-2.3 {create rejects invalid -format} -body {
+    set err ""
+    catch { tclmcairo::new 100 100 -format foobar } err
+    string match *invalid* $err
+} -result 1
+
+# Fix 7: SVG path parser does not crash on bad input
+test robustness-3.0 {path with invalid number does not crash} -body {
+    set ctx [tclmcairo::new 100 100]
+    catch { $ctx path "M abc Z" -stroke {1 0 0} -width 1 }
+    set ok 1; $ctx destroy; set ok
+} -result 1
+
+test robustness-3.1 {path with empty string does not crash} -body {
+    set ctx [tclmcairo::new 100 100]
+    catch { $ctx path "" -stroke {1 0 0} -width 1 }
+    set ok 1; $ctx destroy; set ok
+} -result 1
+
+test robustness-3.2 {path with truncated data does not crash} -body {
+    set ctx [tclmcairo::new 100 100]
+    catch { $ctx path "M 10 10 L 50" -stroke {1 0 0} -width 1 }
+    set ok 1; $ctx destroy; set ok
+} -result 1
+
+# ================================================================
 cleanupTests

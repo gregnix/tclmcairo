@@ -1,8 +1,8 @@
-# tclmcairo 0.2 — Manual
+# tclmcairo 0.3 — Manual
 
 Cairo 2D graphics for Tcl. No Tk required. Runs in `tclsh`.
 
-**Version:** 0.2 · **License:** BSD · **Tcl:** 8.6 / 9.0
+**Version:** 0.3 · **License:** BSD · **Tcl:** 8.6 / 9.0
 **Platform:** Linux, Windows (MSYS2, BAWT), macOS
 **Repository:** https://github.com/gregnix/tclmcairo
 
@@ -729,8 +729,114 @@ make demo TCLSH=tclsh9.0
 | 12 | demo-mime | JPEG MIME embedding (~25% smaller PDF) |
 | 13 | demo-plotchart | Plotchart-style chart with clip_rect |
 | 14 | demo-matrix | -matrix transforms and -get CTM |
+| 15 | demo-operators | Compositing operators (16 blend modes) |
+| 16 | demo-coords | user_to_device, arc_negative, -dash_offset |
+| 17 | demo-gradient-ops | gradient_extend, filter, paint, set_source |
+| 18 | demo-prio3 | font_options, path_get, surface_copy |
 
 ---
+
+
+---
+
+## 0.3 Features
+
+### Compositing Operator
+
+```tcl
+$ctx operator OVER|MULTIPLY|SCREEN|OVERLAY|DARKEN|LIGHTEN|DIFFERENCE|XOR|...
+```
+
+Sets how new drawing combines with existing pixels. Default is `OVER`.
+29 operators total: full Porter-Duff set + CSS blend modes.
+
+### Coordinate Mapping
+
+```tcl
+set d [$ctx user_to_device 10 20]   ;# -> {dx dy} in device space
+set u [$ctx device_to_user 60 70]   ;# -> {x y} in user space
+```
+
+Essential for mouse interaction when transforms are active.
+
+### arc_negative
+
+```tcl
+$ctx arc_negative cx cy r start_deg end_deg ?opts?
+```
+
+Counter-clockwise arc. Equivalent to `cairo_arc_negative`.
+
+### -dash_offset
+
+```tcl
+$ctx line 0 0 400 0 -dash {10 5} -dash_offset 3
+```
+
+Starting offset into the dash pattern (third parameter of `cairo_set_dash`).
+
+### gradient_extend / gradient_filter
+
+```tcl
+$ctx gradient_extend name none|pad|repeat|reflect
+$ctx gradient_filter name fast|good|best|nearest|bilinear
+```
+
+### paint / set_source
+
+```tcl
+$ctx set_source -color {r g b ?a?}   ;# set Cairo source
+$ctx set_source -gradient name
+$ctx paint ?alpha?                    ;# fill entire surface with source
+```
+
+### recording_bbox
+
+```tcl
+set bb [$ctx recording_bbox]   ;# -> {x y w h}  (vector mode only)
+```
+
+### font_options
+
+```tcl
+$ctx font_options -antialias gray -hint_style full -hint_metrics on
+set fo [$ctx font_options]   ;# get current settings
+```
+
+### path_get
+
+```tcl
+set svg [$ctx path_get]   ;# -> "M x y L x y ..." or ""
+```
+
+Path is cleared by Cairo after `stroke`/`fill` — call `path_get` before drawing.
+
+### surface_copy
+
+```tcl
+set cid [$ctx surface_copy]          ;# same size, blank
+set cid [$ctx surface_copy 200 150]  ;# custom size
+tclmcairo circle $cid 100 75 50 -fill {1 0.5 0}
+tclmcairo destroy $cid
+```
+
+### Low-Level Path API
+
+Direct Cairo path commands for porting C examples:
+
+```tcl
+$ctx move_to x y           $ctx rel_move_to dx dy
+$ctx line_to x y           $ctx rel_line_to dx dy
+$ctx curve_to x1 y1 x2 y2 x3 y3
+$ctx rel_curve_to dx1 dy1 dx2 dy2 dx3 dy3
+$ctx close_path            $ctx new_path       $ctx new_sub_path
+$ctx stroke                $ctx fill
+$ctx fill_preserve         $ctx stroke_preserve
+$ctx set_line_width n      $ctx set_line_cap butt|round|square
+$ctx set_line_join miter|round|bevel
+$ctx set_fill_rule winding|evenodd
+$ctx set_source_rgb r g b  $ctx set_source_rgba r g b a
+```
 
 ## Known Limitations
 

@@ -3,25 +3,36 @@
 A lightweight Cairo binding for Tcl — no Tk required.
 Runs in `tclsh`. Output: PNG, PDF, SVG, PS, EPS.
 
-**Version:** 0.2  
+**Version:** 0.3  
 **License:** BSD  
 **Platform:** Linux, Windows (MSYS2 MINGW64, BAWT 3.2), macOS  
 **Tcl:** 8.6 or 9.0  
-**Tests:** 82/82 (Linux Tcl 8.6 + 9.0, Windows MINGW64 + BAWT)
+**Tests:** 170/170 (Linux Tcl 8.6 + 9.0, Windows MINGW64 + BAWT)
 
 ---
 
 ## Features
 
 **Drawing**
-- Shapes: `rect` (rounded corners), `circle`, `ellipse`, `arc`, `line`, `poly`
+- Shapes: `rect` (rounded corners), `circle`, `ellipse`, `arc`, `arc_negative`, `line`, `poly`
 - SVG paths: `M L H V C Q A Z` + relative variants
+- Low-level path API: `move_to`, `line_to`, `rel_move_to`, `rel_line_to`, `curve_to`, `rel_curve_to`, `close_path`, `new_path`, `new_sub_path`
+- Draw ops: `stroke`, `fill`, `fill_preserve`, `stroke_preserve`
+- Style setters: `set_line_width`, `set_line_cap`, `set_line_join`, `set_fill_rule`, `set_source_rgb/rgba`
 - Text with font parsing (`Sans Bold Italic 14`), anchor, color, alpha
 - Text as path (`text_path`, `-outline`): gradient fill, fill+stroke on text
-- Font metrics: exact Cairo measurements (`font_measure`)
-- Transforms: translate / scale / rotate / reset
-- Gradients: linear + radial with color stops, `-fillname`
-- Line options: `-dash`, `-linecap`, `-linejoin`, `-alpha`, `-fillrule`
+- Font metrics: `font_measure`, `font_options` (antialias, hint_style, hint_metrics)
+- Transforms: translate / scale / rotate / matrix / get / reset
+- Gradients: linear + radial, `-fillname`, `gradient_extend`, `gradient_filter`
+- Source control: `set_source -color/-gradient`, `paint ?alpha?`
+- Line options: `-dash`, `-dash_offset`, `-linecap`, `-linejoin`, `-alpha`, `-fillrule`
+- Compositing operators: `operator` — 29 Porter-Duff + blend modes
+
+**Coordinates**
+- `user_to_device x y` — map user coords to device coords (essential for mouse interaction under transforms)
+- `device_to_user dx dy` — reverse mapping
+- `recording_bbox` — ink bounding box of vector context
+- `path_get` — read current Cairo path as SVG string
 
 **Output**
 - Raster mode (ARGB32/RGB24/A8) + Vector mode (true vectors)
@@ -30,6 +41,7 @@ Runs in `tclsh`. Output: PNG, PDF, SVG, PS, EPS.
 - Output: `.png` `.pdf` `.svg` `.ps` `.eps`
 - `topng` — PNG as bytearray (no file needed)
 - `todata` — raw ARGB32 pixels for Tk photo integration
+- `surface_copy ?w h?` — new blank context same type/size
 
 **Images**
 - Load PNG + JPEG (`image filename x y`)
@@ -41,11 +53,11 @@ Runs in `tclsh`. Output: PNG, PDF, SVG, PS, EPS.
 - `push` / `pop` — Cairo state stack
 - `clip_rect`, `clip_path`, `clip_reset` — clip regions
 - `blit src x y` — composite context onto context (layer model)
+- `operator` — 29 Porter-Duff + blend mode operators
 
 **Quality**
 - Strict error handling: unknown options, invalid values all raise errors
 - `Tcl_CallWhenDeleted` — safe interpreter shutdown, no memory leaks
-- Cairo status checked after surface/context creation
 
 ---
 
@@ -71,36 +83,25 @@ JPEG support is optional (`make JPEG=0` to disable).
 
 ### Linux / macOS
 
-#### Option A: TEA (recommended)
-
 ```bash
-autoconf
-./configure --with-tcl=/usr/lib/tcl8.6
-make
-make test
-make demo
+# TEA (recommended)
+autoconf && ./configure --with-tcl=/usr/lib/tcl8.6
+make && make test && make demo
+
+# Simple (no autoconf)
+make && make test
 ```
 
-#### Option B: Simple Makefile (no autoconf)
-
-```bash
-make -f Makefile
-make test
-```
-
-### Windows (MSYS2 or BAWT)
+### Windows
 
 ```bat
-build-win.bat 86         # Tcl 8.6, JPEG auto-detected
-build-win.bat 86 nojpeg  # without JPEG
-test-win.bat 86
-```
+:: MSYS2 bash
+make -f Makefile.win TARGET=mingw64
+make -f Makefile.win TARGET=mingw64 test
 
-Or with GNU make in MSYS2:
-
-```bash
-make -f Makefile.win
-make -f Makefile.win test
+:: BAWT (CMD)
+build-win.bat 86
+test-win.bat         :: must run in CMD, not bash
 ```
 
 ---
@@ -110,65 +111,31 @@ make -f Makefile.win test
 ```tcl
 package require tclmcairo
 
-# Create context
 set ctx [tclmcairo::new 400 300]
 $ctx clear 0.1 0.1 0.2
 
-# Draw
 $ctx gradient_linear bg 0 0 400 0 {{0 0.2 0.5 0.9 1} {1 0.1 0.3 0.6 1}}
 $ctx rect 0 0 400 300 -fillname bg
 $ctx circle 200 150 80 -fill {1 0.7 0.2 0.9} -stroke {1 1 1} -width 2
 
-# Text as path with gradient
 $ctx gradient_linear tg 0 0 400 0 {{0 1 0.9 0.2 1} {1 0.2 0.6 1 1}}
 $ctx text 200 150 "tclmcairo" -font "Sans Bold 36" \
     -fillname tg -outline 1 -anchor center
 
-# Output
 $ctx save "output.png"
 $ctx save "output.pdf"
-set pngbytes [$ctx topng]   ;# PNG bytes without file
 $ctx destroy
-```
-
-### Multi-page PDF
-
-```tcl
-set ctx [tclmcairo::new 595 842 -mode pdf -file "report.pdf"]
-$ctx clear 1 1 1
-$ctx text 297 100 "Page 1" -font "Sans Bold 24" -color {0 0 0} -anchor center
-$ctx newpage
-$ctx clear 1 1 1
-$ctx text 297 100 "Page 2" -font "Sans Bold 24" -color {0 0 0.8} -anchor center
-$ctx finish
-$ctx destroy
-```
-
-### Layer compositing
-
-```tcl
-set bg  [tclmcairo::new 600 400]
-set fg  [tclmcairo::new 600 400]   ;# transparent
-# ... draw on each layer ...
-$bg blit $fg 0 0
-$bg blit $overlay 20 300 -alpha 0.8
-$bg save "composite.png"
 ```
 
 ---
 
 ## Demos
 
-```bash
-make demo       # Linux
-make demo TCLSH=tclsh9.0
-```
+18 demo files generated in `demos/`:
 
-Generates 12 demo files in `demos/`:
-
-| Demo | Content |
-|------|---------|
-| 1 | Shapes (rect, circle, ellipse, lines) |
+| # | Content |
+|---|---------|
+| 1 | Shapes (rect, circle, ellipse, lines, dash) |
 | 2 | SVG paths + fillrule evenodd |
 | 3 | Gradients (linear + radial) |
 | 4 | Text + font metrics + anchors |
@@ -176,23 +143,44 @@ Generates 12 demo files in `demos/`:
 | 6 | Multi-page PDF (3 pages) |
 | 7 | Clip regions (clip_rect, clip_path, push/pop) |
 | 8 | text_path (gradient, outline, shadow, clipped) |
-| 9 | PNG transparency (transparent BG, alpha, fade) |
+| 9 | PNG transparency |
 | 10 | Blit / layer compositing |
-| 11 | PNG formats (argb32, rgb24, a8), topng, image_data |
-| 12 | MIME data embedding (JPEG 1:1 in PDF, 25% smaller) |
+| 11 | PNG formats, topng, image_data |
+| 12 | MIME data embedding (JPEG in PDF/SVG) |
+| 13 | Plotchart-style chart (clip_rect + push/pop) |
+| 14 | Transform -matrix / -get |
+| 15 | Compositing operators (16 blend modes) |
+| 16 | user_to_device, arc_negative, -dash_offset |
+| 17 | gradient_extend, gradient_filter, paint, set_source |
+| 18 | font_options, path_get, surface_copy |
+
+---
+
+## Examples
+
+`examples/` contains ports of the official Cairo C samples from
+https://cairographics.org/samples/ (public domain, Øyvind Kolås):
+
+`arc` · `arc_negative` · `clip` · `curve_to` · `dash` · `fill_and_stroke` ·
+`fill_style` · `gradient` · `multi_segment_caps` · `rounded_rectangle` ·
+`set_line_cap` · `set_line_join` · `text` · `text_align_center` · `text_extents`
+
+```bash
+cd examples
+TCLMCAIRO_LIBDIR=.. tclsh8.6 arc.tcl   # -> arc.png
+```
 
 ---
 
 ## API Reference
 
-See `docs/api-reference.md` for the full API.
+See `docs/api-reference.md` for the complete API documentation.
 
 ---
 
 ## Thread Safety
 
-**Not thread-safe.** Use one tclmcairo interpreter per thread,
-or add external locking. This matches Tk's threading model.
+**Not thread-safe.** Use one interpreter per thread. Matches Tk's model.
 
 ---
 

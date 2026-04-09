@@ -88,7 +88,7 @@ echo === tclmcairo.dll bauen ===
     -I"%CAIROROOT%\include" ^
     -DUSE_TCL_STUBS ^
     -DPACKAGE_NAME="tclmcairo" ^
-    -DPACKAGE_VERSION="0.2" ^
+    -DPACKAGE_VERSION="0.3" ^
     %JPEG_DEFINE% ^
     -o tclmcairo.dll ^
     src\libtclmcairo.c ^
@@ -100,7 +100,7 @@ if errorlevel 1 goto :error
 
 echo.
 echo === pkgIndex.tcl erzeugen ===
-powershell -Command "(Get-Content pkgIndex.tcl.in) -replace '@PACKAGE_NAME@','tclmcairo' -replace '@PACKAGE_VERSION@','0.2' | Set-Content pkgIndex.tcl"
+powershell -Command "(Get-Content pkgIndex.tcl.in) -replace '@PACKAGE_NAME@','tclmcairo' -replace '@PACKAGE_VERSION@','0.3' | Set-Content pkgIndex.tcl"
 if not exist pkgIndex.tcl (
     echo FEHLER: pkgIndex.tcl konnte nicht erzeugt werden.
     exit /b 1

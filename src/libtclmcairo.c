@@ -1687,7 +1687,8 @@ static int CairoFontMeasureCmd(ClientData cd, Tcl_Interp *interp,
     return TCL_OK;
 }
 
-/* tclmcairo transform id -translate x y | -scale sx sy | -rotate deg | -reset */
+/* tclmcairo transform id -translate x y | -scale sx sy | -rotate deg |
+ *                        -matrix a b c d tx ty | -get | -reset         */
 static int CairoTransformCmd(ClientData cd, Tcl_Interp *interp,
     int objc, Tcl_Obj *const objv[])
 {
@@ -1708,8 +1709,30 @@ static int CairoTransformCmd(ClientData cd, Tcl_Interp *interp,
         cairo_rotate(c->cr, deg*M_PI/180.0);
     } else if (!strcmp(op,"-reset")) {
         cairo_identity_matrix(c->cr);
+    } else if (!strcmp(op,"-matrix") && objc >= 10) {
+        /* -matrix a b c d tx ty  (affine 2x3) */
+        cairo_matrix_t m;
+        GET_DOUBLE(interp,objv[4],m.xx); GET_DOUBLE(interp,objv[5],m.yx);
+        GET_DOUBLE(interp,objv[6],m.xy); GET_DOUBLE(interp,objv[7],m.yy);
+        GET_DOUBLE(interp,objv[8],m.x0); GET_DOUBLE(interp,objv[9],m.y0);
+        cairo_transform(c->cr, &m);
+    } else if (!strcmp(op,"-get")) {
+        /* Returns current CTM as {xx yx xy yy x0 y0} */
+        cairo_matrix_t m;
+        cairo_get_matrix(c->cr, &m);
+        Tcl_Obj *lst = Tcl_NewListObj(0, NULL);
+        Tcl_ListObjAppendElement(interp, lst, Tcl_NewDoubleObj(m.xx));
+        Tcl_ListObjAppendElement(interp, lst, Tcl_NewDoubleObj(m.yx));
+        Tcl_ListObjAppendElement(interp, lst, Tcl_NewDoubleObj(m.xy));
+        Tcl_ListObjAppendElement(interp, lst, Tcl_NewDoubleObj(m.yy));
+        Tcl_ListObjAppendElement(interp, lst, Tcl_NewDoubleObj(m.x0));
+        Tcl_ListObjAppendElement(interp, lst, Tcl_NewDoubleObj(m.y0));
+        Tcl_SetObjResult(interp, lst);
     } else {
-        Tcl_SetResult(interp,"transform: -translate x y | -scale sx sy | -rotate deg | -reset",TCL_STATIC);
+        Tcl_SetResult(interp,
+            "transform: -translate x y | -scale sx sy | -rotate deg"
+            " | -matrix xx yx xy yy x0 y0 | -get | -reset",
+            TCL_STATIC);
         return TCL_ERROR;
     }
     return TCL_OK;

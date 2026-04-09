@@ -1127,4 +1127,43 @@ test plotchart-1.3 {plotchart: clip_path with triangle mask} -body {
 } -result 1
 
 # ================================================================
+
+
+# ================================================================
+# transform -matrix / -get
+# ================================================================
+test transform-matrix-1.0 {-matrix applies affine transform} -body {
+    set ctx [mkctx]
+    $ctx transform -matrix 1 0 0 1 50 50   ;# pure translate via matrix
+    set m [$ctx transform -get]
+    $ctx destroy
+    lindex $m 4   ;# x0 should be 50
+} -result 50.0
+
+test transform-matrix-1.1 {-get returns identity after reset} -body {
+    set ctx [mkctx]
+    $ctx transform -translate 100 200
+    $ctx transform -reset
+    set m [$ctx transform -get]
+    $ctx destroy
+    set m
+} -result {1.0 0.0 0.0 1.0 0.0 0.0}
+
+test transform-matrix-1.2 {-get after translate} -body {
+    set ctx [mkctx]
+    $ctx transform -translate 30 70
+    set m [$ctx transform -get]
+    $ctx destroy
+    list [lindex $m 4] [lindex $m 5]   ;# x0 y0
+} -result {30.0 70.0}
+
+test transform-matrix-1.3 {-matrix invalid -> error} -body {
+    set ctx [mkctx]
+    set err ""
+    catch { $ctx transform -matrix 1 0 0 } err
+    $ctx destroy
+    expr {$err ne ""}
+} -result 1
+
+# ================================================================
 cleanupTests

@@ -969,6 +969,141 @@ puts "     Saved: ${saving}B (${pct}%)"
 
 # png_tmp deleted at end
 
+# ================================================================
+# Demo 14: Transform -matrix / -get
+# ================================================================
+puts "Demo 14: Transform matrix..."
+
+set f [file join $outdir demo-matrix.png]
+set W 620; set H 440
+set canvas [tclmcairo::new $W $H]
+$canvas clear 0.1 0.1 0.18
+
+$canvas text [expr {$W/2}] 24 "tclmcairo — transform -matrix / -get" \
+    -font "Sans Bold 16" -color {1 1 1} -anchor center
+
+# Helper: draw a small "stamp" shape (arrow + label)
+proc stamp {ctx label col} {
+    $ctx rect 0 -20 80 40 -fill $col -radius 6
+    $ctx path "M 80 0 L 100 -15 L 100 15 Z" -fill $col
+    $ctx text 40 4 $label -font "Sans Bold 11" \
+        -color {1 1 1} -anchor center
+}
+
+# ---- Panel 1: pure -translate via -matrix ----
+$canvas push
+$canvas clip_rect 10 42 180 185
+$canvas rect 10 42 180 185 -fill {0.14 0.14 0.22} -radius 4
+$canvas text 100 60 "-translate" -font "Sans Bold 12" \
+    -color {0.7 0.7 0.9} -anchor center
+foreach {dx dy col lbl} {
+    60 90  {0.9 0.3 0.2} "origin"
+    100 120 {0.3 0.7 0.9} "+40+30"
+    140 150 {0.2 0.8 0.4} "+80+60"
+} {
+    $canvas push
+    $canvas transform -matrix 1 0 0 1 $dx $dy
+    stamp $canvas $lbl $col
+    $canvas pop
+}
+$canvas pop
+
+# ---- Panel 2: -rotate via -matrix ----
+$canvas push
+$canvas clip_rect 200 42 180 185
+$canvas rect 200 42 180 185 -fill {0.14 0.14 0.22} -radius 4
+$canvas text 290 60 "-rotate (matrix)" -font "Sans Bold 12" \
+    -color {0.7 0.7 0.9} -anchor center
+set cx 290; set cy 145
+$canvas circle $cx $cy 3 -fill {0.5 0.5 0.6}
+foreach {deg col} {0 {0.9 0.3 0.2}  45 {0.3 0.7 0.9}  90 {0.2 0.8 0.4}  135 {1 0.7 0.2}} {
+    set r [expr {$deg * 3.14159 / 180.0}]
+    set c2 [expr {cos($r)}]; set s2 [expr {sin($r)}]
+    $canvas push
+    $canvas transform -matrix $c2 $s2 [expr {-$s2}] $c2 $cx $cy
+    stamp $canvas "${deg}°" $col
+    $canvas pop
+}
+$canvas pop
+
+# ---- Panel 3: -scale via -matrix ----
+$canvas push
+$canvas clip_rect 390 42 220 185
+$canvas rect 390 42 220 185 -fill {0.14 0.14 0.22} -radius 4
+$canvas text 500 60 "-scale (matrix)" -font "Sans Bold 12" \
+    -color {0.7 0.7 0.9} -anchor center
+foreach {sx sy tx ty col lbl} {
+    0.5 0.5 420 95  {0.9 0.3 0.2} "0.5×"
+    0.8 0.8 420 135 {0.3 0.7 0.9} "0.8×"
+    1.2 1.2 420 175 {0.2 0.8 0.4} "1.2×"
+} {
+    $canvas push
+    $canvas transform -matrix $sx 0 0 $sy $tx $ty
+    stamp $canvas $lbl $col
+    $canvas pop
+}
+$canvas pop
+
+# ---- Panel 4: combined matrix (shear + scale) ----
+set py2 240
+$canvas rect 10 $py2 180 185 -fill {0.14 0.14 0.22} -radius 4
+$canvas text 100 [expr {$py2+18}] "shear + scale" -font "Sans Bold 12" \
+    -color {0.7 0.7 0.9} -anchor center
+set row14 0
+foreach {xx yx xy yy tx ty col lbl} [list \
+    1.0 0.3 0.0 1.0  30 [expr {$py2+60}]  {0.9 0.5 0.2} "shear-x" \
+    1.0 0.0 0.3 1.0  30 [expr {$py2+110}] {0.3 0.7 0.9} "shear-y" \
+    1.2 0.2 0.1 0.9  30 [expr {$py2+160}] {0.8 0.3 0.8} "combined" \
+] {
+    $canvas push
+    $canvas transform -matrix $xx $yx $xy $yy $tx $ty
+    stamp $canvas $lbl $col
+    $canvas pop
+    incr row14
+}
+
+# ---- Panel 5: -get demonstration ----
+set px5 200; set py5 $py2
+$canvas rect $px5 $py5 390 185 -fill {0.12 0.18 0.14} -radius 4
+$canvas text [expr {$px5+195}] [expr {$py5+18}] \
+    "transform -get — read current CTM" \
+    -font "Sans Bold 12" -color {0.5 0.9 0.6} -anchor center
+
+# Show CTM values for various transforms
+set row 0
+foreach {op label} {
+    {-reset}            "identity"
+    {-translate 30 20}  "translate 30 20"
+    {-rotate 30}        "rotate 30°"
+    {-scale 1.5 0.8}    "scale 1.5 0.8"
+} {
+    set tmp [tclmcairo::new 10 10]
+    $tmp transform {*}$op
+    set m [$tmp transform -get]
+    $tmp destroy
+
+    set y [expr {$py5 + 45 + $row*33}]
+    $canvas rect [expr {$px5+8}] [expr {$y-12}] 374 28 \
+        -fill {0.15 0.22 0.18} -radius 3
+    $canvas text [expr {$px5+16}] $y $label \
+        -font "Sans Bold 10" -color {0.6 0.9 0.7}
+    # Format matrix values
+    set vals {}
+    foreach v $m { lappend vals [format "%.3f" $v] }
+    $canvas text [expr {$px5+130}] $y \
+        "{[join $vals {  }]}" \
+        -font "Courier 9" -color {0.8 0.9 0.8}
+    incr row
+}
+
+$canvas text [expr {$W/2}] [expr {$H-16}] \
+    "-matrix xx yx xy yy x0 y0  ·  -get returns current CTM  ·  push/pop scopes transforms" \
+    -font "Sans 10" -color {0.5 0.6 0.7} -anchor center
+
+$canvas save $f
+$canvas destroy
+puts "  -> $f"
+
 puts "\nAll demos complete."
 puts "Output files in directory: $outdir"
 

@@ -19,7 +19,7 @@
 #   ./configure --with-tcl=/usr/lib/tcl8.6 --disable-jpeg
 #-----------------------------------------------------------------------
 
-AC_INIT([tclmcairo], [0.3])
+AC_INIT([tclmcairo], [0.3.1])
 
 TEA_INIT([3.9])
 
@@ -38,6 +38,16 @@ AC_SUBST(TCLSH_PROG)
 TEA_PREFIX
 
 TEA_SETUP_COMPILER
+
+# Use system 'install' directly — more portable than install-sh
+INSTALL="install"
+INSTALL_DATA="install -m 644"
+INSTALL_PROGRAM="install -m 755"
+INSTALL_SCRIPT="install -m 755"
+AC_SUBST(INSTALL)
+AC_SUBST(INSTALL_DATA)
+AC_SUBST(INSTALL_PROGRAM)
+AC_SUBST(INSTALL_SCRIPT)
 
 #--------------------------------------------------------------------
 # Cairo -- Pflicht-Dependency
@@ -113,7 +123,7 @@ TEA_ADD_INCLUDES([])
 TEA_ADD_LIBS([-lm])
 TEA_ADD_CFLAGS([])
 TEA_ADD_STUB_SOURCES([])
-TEA_ADD_TCL_SOURCES([tcl/tclmcairo-0.3.tm])
+TEA_ADD_TCL_SOURCES([tcl/tclmcairo-0.3.1.tm tcl/canvas2cairo-0.1.tm tcl/shape_renderer-0.1.tm])
 
 #--------------------------------------------------------------------
 # Tcl Public Headers

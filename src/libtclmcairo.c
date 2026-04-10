@@ -2740,6 +2740,6 @@ int Tclmcairo_Init(Tcl_Interp *interp)
     Tcl_CreateObjCommand(interp, "tclmcairo", TkmCairoCmd, NULL, NULL);
     /* Register cleanup callback — frees all contexts on interp deletion */
     Tcl_CallWhenDeleted(interp, TclmcairoInterpCleanup, NULL);
-    Tcl_PkgProvide(interp, "tclmcairo", "0.3");
+    Tcl_PkgProvide(interp, "tclmcairo", "0.3.1");
     return TCL_OK;
 }

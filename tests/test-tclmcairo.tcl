@@ -1780,9 +1780,9 @@ test lowlevel-1.16 {rel_move_to moves current point} -body {
 # ================================================================
 
 # Fix 1: package version consistency
-test robustness-1.0 {package version is 0.3} -body {
+test robustness-1.0 {package version is 0.3.1} -body {
     package present tclmcairo
-} -result 0.3
+} -result 0.3.1
 
 # Fix 5: low-level commands check argument count
 test robustness-1.1 {move_to requires x y} -body {

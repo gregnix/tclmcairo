@@ -44,7 +44,7 @@
 #
 #   $ctx destroy
 
-package provide tclmcairo 0.3
+package provide tclmcairo 0.3.1
 
 namespace eval ::tclmcairo {
     variable _libloaded 0
@@ -71,6 +71,14 @@ namespace eval ::tclmcairo {
             [pwd] \
             [file join [pwd] lib] \
         ]
+        # Windows split layout: .tm in lib/tcl8/8.6/ → .dll in lib/tclmcairo0.3.1/
+        # Go up 2 levels from tmdir and search for tclmcairo* subdirs
+        set _parent2 [file normalize [file join $_tmdir .. ..]]
+        foreach _pkgdir [glob -nocomplain -directory $_parent2 tclmcairo*] {
+            lappend dirs $_pkgdir
+        }
+        unset -nocomplain _parent2 _pkgdir
+
         # Windows: also try parent of cwd (common when running from subdir)
         if {$::tcl_platform(platform) eq "windows"} {
             lappend dirs [file join [pwd] ..]

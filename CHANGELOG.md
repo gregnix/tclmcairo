@@ -1,351 +1,217 @@
-
----
+# tclmcairo Changelog
 
 ## v0.3 (2026-04-09)
 
 ### New Features
 
-**`operator`** — compositing operator (Porter-Duff + blend modes):
+**Compositing operators** (29 Porter-Duff + CSS blend modes):
 ```tcl
-$ctx operator OVER        ;# default
-$ctx operator MULTIPLY    ;# photo multiply blend
-$ctx operator SCREEN      ;# screen blend
-$ctx operator XOR         ;# exclusive or
-$ctx operator DIFFERENCE  ;# difference
-$ctx operator DARKEN      ;# darken
-$ctx operator LIGHTEN     ;# lighten
-# + SOURCE CLEAR IN OUT ATOP DEST DEST_OVER DEST_IN DEST_OUT
-#   DEST_ATOP ADD SATURATE OVERLAY COLOR_DODGE COLOR_BURN
-#   HARD_LIGHT SOFT_LIGHT EXCLUSION HSL_HUE HSL_SATURATION
-#   HSL_COLOR HSL_LUMINOSITY
+$ctx operator OVER|MULTIPLY|SCREEN|OVERLAY|DARKEN|LIGHTEN|DIFFERENCE|XOR|...
 ```
 
 **`-dash_offset`** — starting offset into dash pattern:
 ```tcl
 $ctx line 0 0 400 0 -dash {10 5} -dash_offset 3
-$ctx path "M 10 10 ..." -stroke {1 0 0} -dash {8 4} -dash_offset 0
 ```
 
-**`arc_negative`** — arc counter-clockwise:
+**`arc_negative`** — counter-clockwise arc:
 ```tcl
 $ctx arc_negative cx cy r start_deg end_deg ?opts?
 ```
 
-**`user_to_device`** / **`device_to_user`** — coordinate mapping:
+**`user_to_device`** / **`device_to_user`** — coordinate mapping under transforms:
 ```tcl
 set d [$ctx user_to_device 10 20]   ;# -> {dx dy}
 set u [$ctx device_to_user 60 70]   ;# -> {x y}
-# Essential for mouse interaction under active transforms
 ```
 
 **`recording_bbox`** — ink bounding box of vector context:
 ```tcl
 set bb [$ctx recording_bbox]   ;# -> {x y w h}
-# Only valid on -mode vector contexts
+```
+
+**`gradient_extend`** — gradient repeat/reflect/pad/none:
+```tcl
+$ctx gradient_extend name repeat|reflect|pad|none
+```
+
+**`gradient_filter`** — interpolation quality:
+```tcl
+$ctx gradient_filter name fast|good|best|nearest|bilinear
+```
+
+**`paint`** — fill entire surface with current source:
+```tcl
+$ctx set_source -color {r g b ?a?}   ;# or -gradient name
+$ctx paint ?alpha?
+```
+
+**`set_source`** — set Cairo source without drawing:
+```tcl
+$ctx set_source -color {r g b ?a?}
+$ctx set_source -gradient name
 ```
 
 **`font_options`** — font rendering quality:
 ```tcl
-$ctx font_options -antialias default|none|gray|subpixel|fast|good|best
-$ctx font_options -hint_style default|none|slight|medium|full
-$ctx font_options -hint_metrics default|on|off
+$ctx font_options -antialias default|none|gray|subpixel|fast|good|best \
+                  -hint_style default|none|slight|medium|full \
+                  -hint_metrics default|on|off
 set fo [$ctx font_options]   ;# -> {-antialias gray -hint_style full ...}
 ```
 
 **`path_get`** — read current Cairo path as SVG string:
 ```tcl
-$ctx path "M 10 10 L 100 50"   ;# path is consumed after stroke/fill
-# Use path_get before draw commands:
 set svg [$ctx path_get]   ;# -> "M 10 10 L 100 50" or ""
 ```
 
-**`surface_copy`** — new blank context same type/format:
+**`surface_copy`** — new blank context of same type/format:
 ```tcl
 set cid [$ctx surface_copy]          ;# same size
-set cid [$ctx surface_copy 400 300]  ;# custom size
+set cid [$ctx surface_copy 200 150]  ;# custom size
 tclmcairo circle $cid 100 75 60 -fill {1 0.5 0}
-tclmcairo save $cid output.png
 tclmcairo destroy $cid
 ```
 
-**`gradient_extend`** — repeat/reflect/pad/none:
+**`transform -matrix`** / **`transform -get`**:
 ```tcl
-$ctx gradient_linear g 0 0 50 0 {{0 1 0 0 1} {1 0 1 0 1}}
-$ctx gradient_extend g repeat   ;# tile the gradient
-$ctx rect 0 0 400 300 -fillname g
+$ctx transform -matrix xx yx xy yy x0 y0   ;# affine 2x3
+set m [$ctx transform -get]                 ;# -> {xx yx xy yy x0 y0}
 ```
 
-**`gradient_filter`** — interpolation quality:
+**Low-level path API** (for porting Cairo C examples):
 ```tcl
-$ctx gradient_filter g best|good|fast|nearest|bilinear
+$ctx move_to x y         $ctx rel_move_to dx dy
+$ctx line_to x y         $ctx rel_line_to dx dy
+$ctx curve_to x1 y1 x2 y2 x3 y3
+$ctx rel_curve_to dx1 dy1 dx2 dy2 dx3 dy3
+$ctx close_path          $ctx new_path     $ctx new_sub_path
+$ctx stroke              $ctx fill
+$ctx fill_preserve       $ctx stroke_preserve
+$ctx set_line_width n    $ctx set_line_cap butt|round|square
+$ctx set_line_join miter|round|bevel
+$ctx set_fill_rule winding|evenodd
+$ctx set_source_rgb r g b   $ctx set_source_rgba r g b a
 ```
 
-**`paint`** — fill entire surface with current source:
+### Examples
+
+`examples/` directory added with 15 ports of the official Cairo C samples
+from https://cairographics.org/samples/ (public domain, Øyvind Kolås):
+`arc`, `arc_negative`, `clip`, `curve_to`, `dash`, `fill_and_stroke`,
+`fill_style`, `gradient`, `multi_segment_caps`, `rounded_rectangle`,
+`set_line_cap`, `set_line_join`, `text`, `text_align_center`, `text_extents`.
+
+### Demos
+
+4 new demos (14–18):
+- Demo 14: Transform -matrix / -get
+- Demo 15: Compositing operators (16 blend modes)
+- Demo 16: user_to_device, arc_negative, -dash_offset
+- Demo 17: gradient_extend, filter, paint, set_source
+- Demo 18: font_options, path_get, surface_copy
+
+### Robustness / Bug Fixes
+
+- **Version consistency**: `Tcl_PkgProvide` and `package provide` both say `0.3`
+  (was `0.2` in C, `0.3` in Tcl — caused `package require` conflict)
+- **pkgIndex.tcl.in**: fixed layout — `.tm` at `$dir/` not `$dir/tcl/`
+- **`create` option validation**: unknown options and odd argument lists now
+  raise `TCL_ERROR` (previously silently ignored)
+- **SVG path parser**: `parse_num` now returns int; `PARSE_NUM` macro uses
+  `goto path_parse_error` to abort on invalid numbers — no more potential
+  infinite loops
+- **Low-level commands**: `move_to`, `line_to`, `rel_move_to`, `rel_line_to`,
+  `curve_to` etc. now validate `objc` before accessing `objv`
+- **Error messages**: migrated from `Tcl_AppendResult` (deprecated in Tcl 9)
+  to `Tcl_SetObjResult(Tcl_ObjPrintf(...))` throughout
+
+
+### canvas2cairo-0.1.tm (new)
+
+Tk Canvas → Cairo export module. Included in `tcl/`.
+
 ```tcl
-$ctx set_source -color {0.2 0.5 0.8}
-$ctx paint            ;# full opacity
-$ctx paint 0.4        ;# with alpha
-$ctx set_source -gradient mygrad
-$ctx paint
+package require canvas2cairo
+canvas2cairo::export .c output.svg   ;# SVG vector
+canvas2cairo::export .c output.pdf   ;# PDF vector
+canvas2cairo::export .c output.ps    ;# PostScript
+canvas2cairo::render .c $ctx         ;# into existing context
 ```
 
-**`set_source`** — set source without drawing:
-```tcl
-$ctx set_source -color {r g b ?a?}
-$ctx set_source -gradient name
-```
+Supported items: `rectangle`, `oval`, `line`, `polygon`, `text`,
+`arc` (pieslice/chord/arc), `image` (photo).
 
+Features: `-state hidden` skip, `-dash`/`-dashoffset`, `-capstyle`,
+`-joinstyle`, `-smooth`, `-arrow`, text `-angle` rotation.
+
+### demos/nodeeditor.tcl (new)
+
+Full node editor application demonstrating canvas2cairo in a real use case:
+
+- Drag-and-drop nodes with ports (left/right/top/bottom)
+- Port-to-port connections via rubber-band drag
+- Orthogonal (Manhattan) routing with U-bypass for backward edges
+- Undo/Redo (Ctrl+Z/Y, 50-step history)
+- Save/Load diagram (`.dia`, Tcl-native format)
+- Export full diagram → SVG/PDF/PS/EPS
+- Export region — rubber-band crop selection → any format incl. PNG
+- Grid toggle, pan (middle mouse), zoom (scroll wheel)
 
 ### Build
 
 - `PACKAGE_VERSION`: `0.3`
 - `.tm`: `tclmcairo-0.3.tm`
+- `configure.in`: `AC_INIT([tclmcairo], [0.3])`
+- `Makefile.win`: `PACKAGE_VERSION = 0.3`
+- `build-win.bat`: updated for 0.3
 
 ### Test Results
 
 | Platform | Tcl | Tests |
 |----------|-----|-------|
-| Linux Debian | 8.6.17 | 123/123 |
+| Linux Debian x86_64 | 8.6.17 | 181/181 |
+| Linux Debian x86_64 | 9.0.3  | 181/181 |
+| Windows 11 MSYS2 MINGW64 | 8.6 | 170/170 |
+| Windows 11 BAWT 3.2 | 8.6 | 170/170 |
+| Windows 11 BAWT 3.2 | 9.0 | 170/170 |
 
-# tclmcairo Changelog
+---
 
 ## v0.2 (2026-04-08)
 
 ### New Features
 
-**Multi-page output** — new `-mode pdf|svg|ps|eps -file filename` option:
-```tcl
-set ctx [tclmcairo::new 595 842 -mode pdf -file "doc.pdf"]
-$ctx clear 1 1 1
-$ctx text 100 100 "Page 1" -font "Sans 14" -color {0 0 0}
-$ctx newpage
-$ctx text 100 100 "Page 2" -font "Sans 14" -color {0 0 0.8}
-$ctx finish
-$ctx destroy
-```
+- `transform -matrix xx yx xy yy x0 y0` — affine matrix transform
+- `transform -get` — read current CTM as `{xx yx xy yy x0 y0}`
+- Demo 14: Transform matrix demo
 
-**Image embedding** — PNG and JPEG support:
-```tcl
-$ctx image "photo.jpg" 50 20 -width 200 -height 150 -alpha 0.9
-$ctx image "logo.png"  10 10
-```
-JPEG is automatically embedded as MIME data in PDF and SVG (no re-encoding,
-no quality loss, ~20-25% smaller files).
+### Changes
 
-**`image_data`** — draw PNG from bytearray (no filename needed):
-```tcl
-$ctx image_data $pngbytes x y ?-width w? ?-height h? ?-alpha a?
-```
-
-**`topng`** — get PNG as bytearray (no file written):
-```tcl
-set bytes [$ctx topng]   ;# works on raster and vector contexts
-```
-
-**`-format` option for `create`** — pixel format for raster contexts:
-```tcl
-tclmcairo::new 400 300 -format argb32   ;# default: 32-bit + alpha
-tclmcairo::new 400 300 -format rgb24    ;# 32-bit, no alpha channel
-tclmcairo::new 400 300 -format a8       ;# 8-bit alpha mask
-```
-
-**SVG options for `create`**:
-```tcl
-# Restrict to SVG 1.1 (limits Cairo features used internally)
-tclmcairo::new 595 842 -mode svg -file out.svg -svg_version 1.1
-
-# Set document unit — appears in width/height SVG attributes
-tclmcairo::new 210 297 -mode svg -file a4.svg -svg_unit mm
-# -> <svg width="210mm" height="297mm" ...>
-# Available units: pt (default) px mm cm in em ex pc
-```
-
-**State stack** — `push` / `pop` (`cairo_save` / `cairo_restore`):
-```tcl
-$ctx push
-$ctx transform -rotate 45
-$ctx rect 10 10 100 50 -fill {1 0 0}
-$ctx pop    ;# rotation gone
-```
-
-**Clip regions**:
-```tcl
-$ctx push
-$ctx clip_rect 50 50 300 200        ;# rectangular clip
-$ctx clip_path "M 100 100 L ..."    ;# arbitrary shape
-$ctx circle 200 150 180 -fill {1 0.3 0.1}
-$ctx clip_reset
-$ctx pop
-```
-
-**Blit / layer compositing**:
-```tcl
-$ctx blit $other_ctx x y ?-alpha a? ?-width w? ?-height h?
-```
-
-**`-outline` option for `text`** — text as path (fill/stroke/gradient):
-```tcl
-$ctx text 200 60 "Hello" -font "Sans Bold 18" \
-    -fillname mygrad -stroke {0.8 0.3 0} -width 1.5 -outline 1
-```
-
-**`text_path`** — always uses `cairo_text_path`:
-```tcl
-$ctx text_path 250 100 "TITLE" -font "Sans Bold 48" \
-    -fillname grad -stroke {1 1 1} -width 1 -anchor center
-```
-
-**`-fillrule evenodd|winding`**:
-```tcl
-$ctx path "M 150 30 ..." -fill {0.2 0.4 0.9} -fillrule evenodd
-```
-
-### Hardening
-
-- **Early load**: `.so`/`.dll` loaded immediately at `package require` —
-  errors appear at load time, not at first `tclmcairo::new`
-- **Cairo status checks**: `cairo_image_surface_create()` and
-  `cairo_create()` checked; `check_cairo()` helper in save path
-- **Interpreter cleanup**: `Tcl_CallWhenDeleted()` frees all contexts
-  on interpreter deletion — no memory leak on `interp delete`
-- **Double-destroy safe**: `CairoDestroyCmd` nulls pointers after free
-- **Thread-safety documented**: NOT thread-safe (same model as Tk)
-
-### API Changes
-
-- `tclmcairo create` accepts new `-mode` values: `pdf`, `svg`, `ps`, `eps`
-- `tclmcairo create` accepts `-file filename` for file-mode contexts
-- `tclmcairo create` accepts `-format argb32|rgb24|a8`
-- `tclmcairo create` accepts `-svg_version 1.1|1.2` and `-svg_unit pt|px|...`
-- `destroy` auto-calls `surface_finish` for file-mode if not already done
-
-**`gradient_extend`** — repeat/reflect/pad/none:
-```tcl
-$ctx gradient_linear g 0 0 50 0 {{0 1 0 0 1} {1 0 1 0 1}}
-$ctx gradient_extend g repeat   ;# tile the gradient
-$ctx rect 0 0 400 300 -fillname g
-```
-
-**`gradient_filter`** — interpolation quality:
-```tcl
-$ctx gradient_filter g best|good|fast|nearest|bilinear
-```
-
-**`paint`** — fill entire surface with current source:
-```tcl
-$ctx set_source -color {0.2 0.5 0.8}
-$ctx paint            ;# full opacity
-$ctx paint 0.4        ;# with alpha
-$ctx set_source -gradient mygrad
-$ctx paint
-```
-
-**`set_source`** — set source without drawing:
-```tcl
-$ctx set_source -color {r g b ?a?}
-$ctx set_source -gradient name
-```
-
-
-### Build
-
-- `Makefile` / `Makefile.win`: JPEG auto-detected (checks for `jpeglib.h`),
-  disable with `JPEG=0`
-- `Makefile.win`: PowerShell pkgIndex generation on one line (no `\` continuation)
-- `build-win.bat`: pkgIndex generation fixed (single-line PowerShell)
-- `PKG_TCL_SOURCES`: now `tclmcairo-0.2.tm`
-- `PACKAGE_VERSION`: `0.2`
+- `write -chan channel` support (ported from AndroWish fork)
+- ISO B/C paper formats added
+- cheatsheet.csd added to docs/
 
 ### Test Results
 
 | Platform | Tcl | Tests |
 |----------|-----|-------|
-| Linux Debian | 8.6.17 | 97/97 |
-| Linux Debian | 9.0.3  | 97/97 |
-| Windows MSYS2 MINGW64 | 8.6 | 97/97 |
-| Windows BAWT 3.2      | 8.6 | 97/97 |
+| Linux Debian x86_64 | 8.6.17 | 105/105 |
+| Windows MSYS2 MINGW64 | 8.6 | 105/105 |
 
 ---
 
-## v0.1 (2026-04-07)
+## v0.1 (2026-03-30)
 
-First release. Fully tested on all supported platforms.
-
-### Features
-
-- Shapes: `rect` (with `-radius`), `circle`, `ellipse`, `arc`, `line`, `poly`
-- SVG paths: `M L H V C Q Z` fully supported; `A` with basic ellipse approximation
-- Text: font parsing (`Sans Bold Italic 14`), anchor, color, alpha
-- Font metrics: `font_measure` → `{width height ascent descent}`
-- Transforms: translate / scale / rotate / reset
-- Gradients: linear + radial with color stops, `-fillname`
-- Line options: `-dash`, `-linecap`, `-linejoin`, `-alpha`
-- Output: PNG, PDF, SVG, PS, EPS
-- Raster mode (ARGB32) + Vector mode (Recording Surface → true vectors)
-- 5 demos, each saved in all 5 output formats
-
-### Error Handling
-
-- Unknown options raise `TCL_ERROR`
-- Invalid color, out-of-range values, wrong argument counts all raise errors
-- All `parse_opts` callers propagate errors cleanly
-
-### Bug Fixes
-
-- Text alpha: `-color {r g b a}` alpha was ignored — fixed
-- `line` color alpha: same fix applied
-- All `strncpy` calls: explicit null-terminator added
-- Gradient name buffer: null-terminator added
-
-**`gradient_extend`** — repeat/reflect/pad/none:
-```tcl
-$ctx gradient_linear g 0 0 50 0 {{0 1 0 0 1} {1 0 1 0 1}}
-$ctx gradient_extend g repeat   ;# tile the gradient
-$ctx rect 0 0 400 300 -fillname g
-```
-
-**`gradient_filter`** — interpolation quality:
-```tcl
-$ctx gradient_filter g best|good|fast|nearest|bilinear
-```
-
-**`paint`** — fill entire surface with current source:
-```tcl
-$ctx set_source -color {0.2 0.5 0.8}
-$ctx paint            ;# full opacity
-$ctx paint 0.4        ;# with alpha
-$ctx set_source -gradient mygrad
-$ctx paint
-```
-
-**`set_source`** — set source without drawing:
-```tcl
-$ctx set_source -color {r g b ?a?}
-$ctx set_source -gradient name
-```
-
-
-### Build
-
-- `Makefile.win`: MSYS2 targets (mingw-ucrt64, mingw64, bawt86, bawt90)
-- `build-win.bat`: BAWT build with auto-detect of Cairo from MSYS2 MINGW64
-- `test-win.bat`: sets `C:\msys64\mingw64\bin` in PATH for cairo.dll
-- `check-bawt.bat`: BAWT installation checker
-- TEA: Cairo detection via `pkg-config`, `TCLSH` overridable
-
-### Known Limitations
-
-- Text: Cairo Toy API — no HarfBuzz, no BiDi, no CJK shaping
-- Windows: Tcl 8.6 only
-- Single-page output only (multi-page added in v0.2)
-- No image embedding (added in v0.2)
-
-### Test Results
-
-| Platform | Tcl | Tests |
-|----------|-----|-------|
-| Linux Debian | 8.6.17 | 41/41 |
-| Linux Debian | 9.0.3  | 41/41 |
-| Windows MSYS2 UCRT64  | 8.6.17 | 41/41 |
-| Windows MSYS2 MINGW64 | 8.6.17 | 41/41 |
-| Windows BAWT 3.2      | 8.6    | 41/41 |
+Initial release. Core features:
+- Shapes: rect, circle, ellipse, arc, line, poly, path (SVG)
+- Text with font_measure, anchors, outline/gradient mode
+- Gradients: linear + radial
+- Transforms: translate/scale/rotate/reset
+- Modes: raster, vector, pdf, svg, ps, eps
+- Images: PNG + JPEG (MIME embedding)
+- Blit / layer compositing
+- Clip: clip_rect, clip_path, push/pop
+- topng, todata (Tk photo integration)
+- TEA build (Linux), Makefile.win (Windows)
+- 41/41 tests

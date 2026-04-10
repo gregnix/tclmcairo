@@ -1,6 +1,6 @@
 # tclmcairo — API Reference
 
-Version 0.3 · BSD License
+Version 0.3.1 · BSD License
 
 ---
 
@@ -510,3 +510,24 @@ $ctx text 200 165 "tclmcairo 0.3" -font "Sans Bold 32" \
 $ctx save "banner.png"
 $ctx destroy
 ```
+
+---
+
+## canvas2cairo
+
+See `docs/canvas2cairo.md` for the full canvas2cairo API reference.
+
+Quick reference:
+
+```tcl
+package require canvas2cairo
+
+canvas2cairo::export canvas filename   ;# .svg .pdf .ps .eps
+canvas2cairo::render canvas ctx        ;# into existing tclmcairo context
+```
+
+Supported items: `rectangle` `oval` `line` `polygon` `text`
+`arc` (pieslice/chord/arc) `image` (photo)
+
+All output formats are true vectors. The canvas does not need to be
+visible — size is read from `[$canvas cget -width/height]`.

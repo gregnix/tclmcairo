@@ -1,27 +1,47 @@
-# tclmcairo 0.3 — Manual
+# tclmcairo — Manual
 
 Cairo 2D graphics for Tcl. No Tk required. Runs in `tclsh`.
 
-**Version:** 0.3 · **License:** BSD · **Tcl:** 8.6 / 9.0
-**Platform:** Linux, Windows (MSYS2, BAWT), macOS
+**Version:** 0.3.1 · **License:** BSD · **Tcl:** 8.6 / 9.0  
+**Platform:** Linux, Windows (MSYS2, BAWT), macOS  
 **Repository:** https://github.com/gregnix/tclmcairo
+
+---
+
+## Contents
+
+1. [Installation](#installation)
+2. [Quick Start](#quick-start)
+3. [Core Concepts](#core-concepts)
+4. [Output Formats](#output-formats)
+5. [Drawing Shapes](#drawing-shapes)
+6. [Paths](#paths)
+7. [Text](#text)
+8. [Gradients](#gradients)
+9. [Images](#images)
+10. [Transforms](#transforms)
+11. [Transparency and Compositing](#transparency-and-compositing)
+12. [canvas2cairo — Tk Canvas Export](#canvas2cairo)
+13. [shape_renderer — Shape Icons](#shape_renderer)
+14. [Demos](#demos)
 
 ---
 
 ## Installation
 
-### Linux
+### Linux (Debian/Ubuntu)
 
 ```bash
-# Dependencies
 sudo apt install libcairo2-dev libjpeg-dev tcl8.6-dev build-essential autoconf
 
-# Build (TEA)
 autoconf
 ./configure --with-tcl=/usr/lib/tcl8.6
 make && make test
+sudo make install
+```
 
-# Tcl 9
+For Tcl 9:
+```bash
 ./configure --with-tcl=/usr/lib/tcl9.0
 make && make test TCLSH=tclsh9.0
 ```
@@ -31,17 +51,15 @@ make && make test TCLSH=tclsh9.0
 ```bash
 pacman -S mingw-w64-x86_64-cairo mingw-w64-x86_64-libjpeg-turbo
 make -f Makefile.win TARGET=mingw64
-make -f Makefile.win TARGET=mingw64 test
 ```
 
 ### Windows (BAWT 3.2)
 
 ```cmd
 build-win.bat 86
-test-win.bat 86
 ```
 
-### Usage
+### Usage Without Install
 
 ```tcl
 tcl::tm::path add /path/to/tclmcairo/tcl
@@ -56,807 +74,497 @@ package require tclmcairo
 ```tcl
 package require tclmcairo
 
+# Create a 400x300 raster context
 set ctx [tclmcairo::new 400 300]
+
+# Background
 $ctx clear 0.1 0.1 0.2
 
-$ctx gradient_linear bg 0 0 400 0 {{0 0.2 0.5 0.9 1} {1 0.1 0.3 0.6 1}}
-$ctx rect 0 0 400 300 -fillname bg
+# Draw a circle with gradient fill
+$ctx gradient_radial grad 200 150 80 {
+    {0   1.0 0.8 0.2 1}
+    {0.6 0.9 0.4 0.1 1}
+    {1   0.6 0.1 0.0 0}
+}
+$ctx circle 200 150 80 -fillname grad
 
-$ctx circle 200 150 80 -fill {1 0.7 0.2 0.9} -stroke {1 1 1} -width 2
+# Text
+$ctx text 200 280 "Hello, Cairo!" \
+    -font "Sans 20 Bold" -color {1 1 1} -anchor center
 
-$ctx gradient_linear tg 0 0 400 0 {{0 1 0.9 0.2 1} {1 0.2 0.6 1 1}}
-$ctx text 200 150 "tclmcairo" -font "Sans Bold 36" \
-    -fillname tg -outline 1 -anchor center
-
-$ctx save "output.png"
-$ctx save "output.pdf"
+# Save as PNG
+$ctx save output.png
 $ctx destroy
 ```
 
 ---
 
-## Create / Destroy
+## Core Concepts
+
+### Context
+
+Every drawing operation works on a **context** — a Cairo surface with a
+coordinate system. The context tracks: current transform, clip region,
+line settings, fill/stroke color, and a state stack.
 
 ```tcl
-tclmcairo::new width height ?options?
+set ctx [tclmcairo::new width height ?options?]
 $ctx destroy
 ```
 
-### Options
+### Coordinate System
 
-| Option | Values | Default | Description |
-|--------|--------|---------|-------------|
-| `-mode` | `raster\|vector\|pdf\|svg\|ps\|eps` | `raster` | Output mode |
-| `-file` | filename | — | Required for `pdf\|svg\|ps\|eps` |
-| `-format` | `argb32\|rgb24\|a8` | `argb32` | Raster pixel format |
-| `-svg_version` | `1.1\|1.2` | `1.2` | SVG spec version |
-| `-svg_unit` | `pt\|px\|mm\|cm\|in\|em\|ex\|pc` | `pt` | SVG document unit |
-
-### Modes
-
-| Mode | Description |
-|------|-------------|
-| `raster` | ARGB32 pixel buffer. For PNG, `topng`, `todata`. |
-| `vector` | Recording surface. Saves as true vectors to any format. |
-| `pdf` | Direct PDF. Multi-page via `newpage`. |
-| `svg` | Direct SVG. Multi-page via `newpage`. |
-| `ps` | Direct PostScript. |
-| `eps` | Direct EPS. |
-
-### Pixel formats (`-format`)
-
-| Value | Bits | Alpha | Use case |
-|-------|------|-------|----------|
-| `argb32` | 32 | yes | default, transparent background |
-| `rgb24` | 32 | no | solid background, no transparency |
-| `a8` | 8 | mask only | alpha mask for clipping/compositing |
-
-```tcl
-# Raster
-set ctx [tclmcairo::new 400 300]
-set ctx [tclmcairo::new 400 300 -format rgb24]
-
-# Vector
-set ctx [tclmcairo::new 400 300 -mode vector]
-
-# Direct PDF — multi-page
-set ctx [tclmcairo::new 595 842 -mode pdf -file "doc.pdf"]
-$ctx clear 1 1 1
-$ctx text 297 100 "Page 1" -font "Sans 18" -color {0 0 0} -anchor center
-$ctx newpage
-$ctx text 297 100 "Page 2" -font "Sans 18" -color {0 0 0.8} -anchor center
-$ctx finish
-$ctx destroy
-
-# SVG with millimeter units
-set ctx [tclmcairo::new 210 297 -mode svg -file "a4.svg" -svg_unit mm]
-```
-
----
-
-## Basic Operations
-
-```tcl
-$ctx clear r g b ?a?    ;# background fill, components 0.0-1.0
-$ctx size               ;# -> {width height}
-$ctx save filename      ;# write to file (.png .pdf .svg .ps .eps)
-$ctx topng              ;# -> PNG bytearray (no file needed)
-$ctx todata             ;# -> raw ARGB32 bytes (for Tk photo)
-$ctx newpage            ;# next page (pdf|svg|ps|eps mode)
-$ctx finish             ;# flush + close file (pdf|svg|ps|eps mode)
-$ctx destroy            ;# release context (calls finish if needed)
-```
-
-### `topng` vs `todata`
-
-| Command | Returns | Typical use |
-|---------|---------|-------------|
-| `topng` | PNG-compressed bytes | HTTP, database, `image_data`, roundtrip |
-| `todata` | Raw ARGB32 stride×height | Tk photo `-data` |
-
-`topng` works on both raster and vector contexts (renders to raster first).
-
----
-
-## Drawing Commands
+Origin (0,0) is top-left. X increases right, Y increases down.
+All coordinates are floating-point (sub-pixel precision).
 
 ### Colors
 
-All colors are `{r g b}` or `{r g b a}` with components 0.0–1.0.
+Colors are specified as `{r g b}` or `{r g b a}` with values 0.0–1.0:
 
 ```tcl
--fill   {1 0.5 0}       ;# orange, fully opaque
--fill   {1 0.5 0 0.8}   ;# orange, 80% opacity
--stroke {0 0 0}         ;# black outline
--color  {1 1 1}         ;# white (for line, text)
+{1 0 0}       ;# red, fully opaque
+{0 0.5 1 0.8} ;# blue, 80% opacity
 ```
 
-### rect
+### State Stack
 
 ```tcl
-$ctx rect x y w h ?options?
+$ctx push   ;# save: transform, clip, color, line settings
+# ... draw ...
+$ctx pop    ;# restore saved state
 ```
 
-| Option | Description |
-|--------|-------------|
-| `-fill c` | Fill color |
-| `-stroke c` | Outline color |
-| `-width n` | Outline width |
-| `-radius r` | Rounded corner radius |
-| `-alpha a` | Overall opacity |
-| `-fillname n` | Fill with named gradient |
+---
+
+## Output Formats
+
+| Mode | Format | Use |
+|------|--------|-----|
+| `raster` (default) | PNG via `$ctx save` | Screen output, image processing |
+| `pdf` | PDF vector | Documents, print |
+| `svg` | SVG vector | Web, scalable graphics |
+| `ps` | PostScript | Print |
+| `eps` | EPS | Embedded in documents |
 
 ```tcl
-$ctx rect 10 10 200 100 -fill {0.2 0.5 1} -radius 8
-$ctx rect 10 10 200 100 -stroke {1 1 1} -width 2
-$ctx rect 10 10 200 100 -fillname mygrad -stroke {0 0 0} -width 1
+# Raster (PNG)
+set ctx [tclmcairo::new 800 600]
+$ctx save output.png
+
+# PDF vector
+set ctx [tclmcairo::new 595 842 -mode pdf -file "doc.pdf"]
+$ctx finish   ;# flushes PDF
+
+# SVG
+set ctx [tclmcairo::new 400 300 -mode svg -file "image.svg"]
+$ctx finish
+
+# Multi-page PDF
+set ctx [tclmcairo::new 595 842 -mode pdf -file "report.pdf"]
+# ... page 1 ...
+$ctx newpage
+# ... page 2 ...
+$ctx finish
+$ctx destroy
 ```
 
-### circle
-
+**Get PNG bytes** (for embedding in Tk, etc.):
 ```tcl
-$ctx circle cx cy r ?options?
+set bytes [$ctx topng]   ;# raw PNG bytearray
 ```
 
-Same options as `rect` (no `-radius`).
+---
 
-### ellipse
+## Drawing Shapes
+
+All shapes accept `-fill`, `-stroke`, `-width` options.
+Colors as `{r g b}` or `{r g b a}`.
+
+### Rectangle
 
 ```tcl
+$ctx rect x y width height ?options?
+```
+
+```tcl
+$ctx rect 10 10 200 100 -fill {0.3 0.6 0.9}
+$ctx rect 10 10 200 100 -fill {0.3 0.6 0.9} -stroke {0 0 0} -width 2
+$ctx rect 10 10 200 100 -fill {0.3 0.6 0.9} -radius 12   ;# rounded corners
+```
+
+### Circle / Ellipse
+
+```tcl
+$ctx circle cx cy radius ?options?
 $ctx ellipse cx cy rx ry ?options?
 ```
 
-### arc
-
 ```tcl
-$ctx arc cx cy r start_deg end_deg ?options?
+$ctx circle 200 150 80 -fill {1 0.5 0}
+$ctx ellipse 200 150 100 60 -stroke {0 0 1} -width 2
 ```
 
-Draws arc from `start_deg` to `end_deg` (clockwise, degrees).
-
-```tcl
-$ctx arc 200 150 80 0 270 -stroke {1 0.5 0} -width 3
-```
-
-### line
+### Line / Polyline
 
 ```tcl
 $ctx line x1 y1 x2 y2 ?options?
 ```
 
-| Option | Values | Description |
-|--------|--------|-------------|
-| `-color c` | `{r g b ?a?}` | Line color |
-| `-width n` | number | Line width |
-| `-dash {on off}` | list | Dash pattern |
-| `-linecap` | `butt\|round\|square` | End cap style |
-| `-alpha a` | 0.0–1.0 | Opacity |
-
-### poly
-
 ```tcl
-$ctx poly x1 y1 x2 y2 x3 y3 ... ?options?
+$ctx line 10 10 200 200 -color {1 0 0} -width 3
+$ctx line 10 10 200 200 -color {1 0 0} -width 3 -dash {8 4}
+$ctx line 10 10 200 200 -color {1 0 0} -width 3 -linecap round
 ```
 
-Minimum 3 coordinate pairs. Same fill/stroke options as `rect`.
+**Dash patterns:** `{on off}` or `{on off on off ...}` in pixels.
 
-### path
+**Line caps:** `butt` (default) · `round` · `square`  
+**Line joins:** `miter` (default) · `round` · `bevel`
 
-```tcl
-$ctx path svgdata ?options?
-```
-
-Full SVG path syntax: `M L H V C Q A Z` and lowercase relative variants.
+### Arc
 
 ```tcl
-# Triangle
-$ctx path "M 100 10 L 190 190 L 10 190 Z" -fill {0.8 0.3 0.1}
-
-# Bezier curve
-$ctx path "M 50 200 C 50 100 350 100 350 200" \
-    -stroke {0 0.5 1} -width 3
-
-# Combined fill + stroke
-$ctx path "M 10 10 L 200 10 L 200 150 Z" \
-    -fill {0.2 0.5 0.9 0.7} -stroke {1 1 1} -width 1.5
-
-# Evenodd fill rule (star with hole)
-$ctx path "M 100 10 L 120 70 L 180 70 L 130 110 \
-    L 150 170 L 100 130 L 50 170 L 70 110 \
-    L 20 70 L 80 70 Z" \
-    -fill {1 0.6 0} -fillrule evenodd
+$ctx arc cx cy rx ry start_deg end_deg ?options?
 ```
 
-**`-fillrule`**: `winding` (default) or `evenodd`
+```tcl
+$ctx arc 200 150 80 80 0 270 -stroke {0 0.5 1} -width 3
+$ctx arc 200 150 80 60 45 315 -fill {1 0.8 0.2 0.7}
+```
+
+Angles in degrees, clockwise from 3 o'clock (East).
+
+```tcl
+$ctx arc_negative cx cy rx ry start end ?options?   ;# counter-clockwise
+```
+
+### Polygon
+
+```tcl
+$ctx poly x1 y1 x2 y2 ... ?options?
+```
+
+```tcl
+$ctx poly 100 20 180 160 20 160 -fill {0.3 0.7 0.3} -stroke {0 0.4 0} -width 2
+```
+
+---
+
+## Paths
+
+Full SVG path syntax:
+
+```tcl
+$ctx path "M x y L x y C x1 y1 x2 y2 x y Z" ?options?
+```
+
+| Command | Description |
+|---------|-------------|
+| `M x y` | Move to |
+| `L x y` | Line to |
+| `C x1 y1 x2 y2 x y` | Cubic Bézier |
+| `Q x1 y1 x y` | Quadratic Bézier |
+| `A rx ry rot large sweep x y` | Arc |
+| `Z` | Close path |
+
+```tcl
+# Star
+$ctx path "M 100 10 L 120 80 L 190 80 L 135 120 L 160 190
+           L 100 145 L 40 190 L 65 120 L 10 80 L 80 80 Z" \
+    -fill {1 0.8 0} -stroke {0.8 0.5 0} -width 2
+
+# Cubic Bézier curve
+$ctx path "M 50 150 C 100 50 200 50 250 150" \
+    -stroke {0.2 0.5 1} -width 3
+
+# Get path as coordinate list
+set coords [$ctx path_get "M 50 100 L 200 100 A 50 50 0 0 1 250 150"]
+```
 
 ---
 
 ## Text
 
-### text
-
 ```tcl
 $ctx text x y string ?options?
 ```
 
-x/y is the anchor point.
-
-| Option | Values | Description |
-|--------|--------|-------------|
-| `-font str` | `"Sans Bold 14"` | Font spec: family style size |
-| `-color c` | `{r g b ?a?}` | Text color |
-| `-anchor` | `center nw n ne e se s sw w` | Anchor point |
-| `-alpha a` | 0.0–1.0 | Opacity |
-| `-outline 0\|1` | bool | `0`=`show_text` (default), `1`=`text_path` |
-| `-fillname n` | gradient name | Fill gradient (requires `-outline 1`) |
-| `-stroke c` | color | Outline color (requires `-outline 1`) |
-| `-width n` | number | Stroke width (requires `-outline 1`) |
+| Option | Values | Notes |
+|--------|--------|-------|
+| `-font` | `"Family ?Bold? ?Italic? size"` | e.g. `"Sans Bold 14"` |
+| `-color` | `{r g b}` | text color |
+| `-anchor` | `center nw n ne e se s sw w` | position relative to x,y |
+| `-outline` | `0\|1` | render as path (scalable in SVG) |
 
 ```tcl
-# Simple text
-$ctx text 200 150 "Hello World" \
-    -font "Sans Bold 24" -color {1 1 1} -anchor center
-
-# Gradient fill on text
-$ctx gradient_linear tg 0 0 400 0 {{0 1 0.9 0 1} {1 0 0.5 1 1}}
-$ctx text 200 150 "GRADIENT" \
-    -font "Sans Bold 36" -fillname tg -outline 1 -anchor center
-
-# Outline only
-$ctx text 200 150 "OUTLINE" \
-    -font "Sans Bold 36" -stroke {0.2 0.6 1} -width 1.5 \
-    -outline 1 -anchor center
+$ctx text 200 100 "Hello" -font "Sans 24 Bold" -color {1 1 1} -anchor center
+$ctx text 10 50 "Italic" -font "Serif 16 Italic" -color {0.2 0.4 0.8}
 ```
 
-**Font spec format:** `"Family Style Size"` or `"Family Size"`
-
-```
-"Sans 14"
-"Sans Bold 18"
-"Sans Bold Italic 12"
-"Serif 16"
-"Monospace 11"
-"DejaVu Sans Bold 20"
-```
-
-### text_path
-
+**Text as outline path** (for SVG/PDF font-independence):
 ```tcl
-$ctx text_path x y string ?options?
+$ctx text 100 100 "Outlined" -font "Sans 36 Bold" \
+    -fill {0.2 0.5 0.9} -stroke {0 0 0} -width 1 -outline 1
 ```
 
-Always uses `cairo_text_path` (equivalent to `text ... -outline 1`).
-Supports all the same options as `text`.
-
-### font_measure
-
+**Text metrics:**
 ```tcl
-$ctx font_measure string font
-;# -> {width height ascent descent}
-```
+# Font extents: {ascent descent height max_x_advance max_y_advance}
+set fe [$ctx font_extents "Sans 14"]
 
-Returns exact Cairo text metrics.
-
-```tcl
-set m [$ctx font_measure "Hello" "Sans Bold 18"]
-lassign $m w h asc desc
+# Text extents: {x_bearing y_bearing width height x_advance y_advance}
+set te [$ctx text_extents "Hello" "Sans 14"]
+set text_width [lindex $te 2]
 ```
 
 ---
 
 ## Gradients
 
-Gradients must be defined before use, scoped to the context.
-
-### gradient_linear
+### Linear Gradient
 
 ```tcl
 $ctx gradient_linear name x1 y1 x2 y2 stops
 ```
 
-`stops`: list of `{offset r g b a}` — offset 0.0–1.0.
-
 ```tcl
-# Horizontal blue-to-red
-$ctx gradient_linear g 0 0 400 0 \
-    {{0 0.2 0.4 0.9 1} {1 0.9 0.2 0.1 1}}
-
-# With midpoint
-$ctx gradient_linear g2 0 0 0 300 \
-    {{0 1 1 1 1} {0.5 0.5 0.7 1 1} {1 0 0 0 1}}
-
-$ctx rect 0 0 400 300 -fillname g
+$ctx gradient_linear grad 0 0 400 0 {
+    {0   0.2 0.5 0.9 1}
+    {0.5 0.1 0.3 0.7 1}
+    {1   0.0 0.1 0.4 1}
+}
+$ctx rect 0 0 400 200 -fillname grad
 ```
 
-### gradient_radial
+### Radial Gradient
 
 ```tcl
 $ctx gradient_radial name cx cy radius stops
 ```
 
 ```tcl
-$ctx gradient_radial gr 200 150 100 \
-    {{0 1 0.9 0.2 1} {0.6 0.5 0.8 1 0.8} {1 0 0 0 0}}
-$ctx circle 200 150 100 -fillname gr
+$ctx gradient_radial glow 200 150 100 {
+    {0   1.0 0.9 0.3 1}
+    {0.7 0.9 0.4 0.1 1}
+    {1   0.5 0.1 0.0 0}
+}
+$ctx circle 200 150 100 -fillname glow
 ```
 
----
+**Stops:** `{offset r g b a}` — offset 0.0–1.0.
 
-## State Stack
-
-`push`/`pop` save and restore: transforms, clip, color state.
-Always use them around clips and temporary transforms.
+### Gradient Options
 
 ```tcl
-$ctx push
-$ctx transform -rotate 45
-$ctx rect 10 10 80 80 -fill {1 0.5 0}
-$ctx pop   ;# rotation gone, state restored
-```
-
----
-
-## Clip Regions
-
-```tcl
-$ctx clip_rect x y w h         ;# rectangular clip
-$ctx clip_path svgdata          ;# arbitrary path as clip mask
-$ctx clip_reset                 ;# remove all clips in current state
-```
-
-Always wrap in `push`/`pop`:
-
-```tcl
-$ctx push
-$ctx clip_rect 50 50 300 200
-$ctx circle 200 150 180 -fill {1 0.3 0.1}
-$ctx clip_reset
-$ctx pop
-
-# Clip to triangle
-$ctx push
-$ctx clip_path "M 200 10 L 390 390 L 10 390 Z"
-$ctx gradient_linear g 0 0 400 0 {{0 1 0 0 1} {1 0 0 1 1}}
-$ctx rect 0 0 400 400 -fillname g
-$ctx pop
-```
-
-### Plotchart-style: clip_rect + push/pop
-
-```tcl
-# Map data coordinates to pixels
-proc px x { expr {$lm + ($x-$xmin)/($xmax-$xmin)*$pw} }
-proc py y { expr {$H-$bm - ($y-$ymin)/($ymax-$ymin)*$ph} }
-
-# Clip to plot area — data lines stay inside
-$ctx push
-$ctx clip_rect $lm $tm $pw $ph
-$ctx path $sin_path -stroke {0.2 0.4 0.9} -width 2
-$ctx path $cos_path -stroke {0.9 0.3 0.2} -width 2
-$ctx pop   ;# clip released
-
-# Axes and labels drawn freely outside
-$ctx line $lm [expr {$H-$bm}] [expr {$lm+$pw}] [expr {$H-$bm}] \
-    -color {0.2 0.2 0.3} -width 1.5
-```
-
-This replaces `raise`/`lower` in Tk Canvas — no Z-order manipulation needed.
-
----
-
-## Transforms
-
-All transforms accumulate on the current transformation matrix (CTM).
-
-```tcl
-$ctx transform -translate dx dy
-$ctx transform -rotate degrees      ;# clockwise
-$ctx transform -scale sx sy
-$ctx transform -matrix xx yx xy yy x0 y0   ;# affine 2x3
-$ctx transform -get                 ;# -> {xx yx xy yy x0 y0}
-$ctx transform -reset               ;# identity matrix
-```
-
-### The affine matrix
-
-Cairo uses a 2×3 affine matrix `{xx yx xy yy x0 y0}`:
-
-```
-x' = xx*x + xy*y + x0
-y' = yx*x + yy*y + y0
-```
-
-| Transform | Matrix |
-|-----------|--------|
-| Identity | `1 0 0 1 0 0` |
-| Translate (tx, ty) | `1 0 0 1 tx ty` |
-| Scale (sx, sy) | `sx 0 0 sy 0 0` |
-| Rotate θ | `cos(θ) sin(θ) -sin(θ) cos(θ) 0 0` |
-| Shear-X by k | `1 0 k 1 0 0` |
-
-```tcl
-# 45° rotation around center (200, 150)
-set r [expr {45 * 3.14159 / 180.0}]
-set c [expr {cos($r)}]
-set s [expr {sin($r)}]
-$ctx transform -matrix $c $s [expr {-$s}] $c 200 150
-
-# Read current CTM
-set m [$ctx transform -get]
-# -> e.g. {0.707 0.707 -0.707 0.707 200.0 150.0}
-
-# Transforms stack — use push/pop to scope
-$ctx push
-$ctx transform -translate 100 100
-$ctx transform -rotate 30
-$ctx rect 0 0 80 40 -fill {1 0.5 0}
-$ctx pop   ;# both transforms gone
+$ctx gradient_extend name pad|repeat|reflect
+$ctx gradient_filter name fast|good|best
 ```
 
 ---
 
 ## Images
 
-### image
+### Load Image
 
 ```tcl
-$ctx image filename x y ?options?
+$ctx image file x y ?-width w? ?-height h? ?-alpha a?   ;# .png or .jpg
 ```
-
-Supported formats: PNG (always), JPEG (if built with `HAVE_LIBJPEG`).
-
-| Option | Description |
-|--------|-------------|
-| `-width w` | Scale to width |
-| `-height h` | Scale to height |
-| `-alpha a` | Opacity 0.0–1.0 |
-
-**JPEG MIME embedding:** When saving to PDF or SVG, JPEG files are
-automatically embedded as MIME data (`CAIRO_MIME_TYPE_JPEG`) — original
-bytes are written 1:1, no re-encoding, no quality loss, ~20-25% smaller
-files compared to PNG.
-
-### image_data
 
 ```tcl
-$ctx image_data bytes x y ?options?
+$ctx image "photo.png" 10 10
+$ctx image "photo.jpg" 0 0 -width 200 -height 150 -alpha 0.8
 ```
 
-Draws a PNG from a Tcl bytearray — no filename needed.
-Same `-width`, `-height`, `-alpha` options as `image`.
+### Raw PNG Bytes
 
 ```tcl
-# In-memory pipeline: draw -> topng -> image_data
-set src [tclmcairo::new 100 100]
-$src circle 50 50 45 -fill {1 0.5 0}
-set bytes [$src topng]
-$src destroy
-
-set dst [tclmcairo::new 400 300]
-$dst image_data $bytes  10 10
-$dst image_data $bytes 120 10 -width 80 -alpha 0.7
-$dst image_data $bytes 210 10 -width 60 -height 60
-$dst save "composed.png"
-$dst destroy
+$ctx image_data bytes x y    ;# PNG bytearray from file or topng
 ```
 
----
+```tcl
+# Copy one context onto another
+set bytes [$ctx2 topng]
+$ctx image_data $bytes 50 50
+```
 
-## Blit / Layer Compositing
+### Blit (Surface Copy)
 
 ```tcl
 $ctx blit src_ctx x y ?options?
 ```
 
-Composites `src_ctx` onto `$ctx` at position (x, y).
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `-alpha a` | `1.0` | Compositing opacity |
-| `-width w` | src width | Scale to width |
-| `-height h` | src height | Scale to height |
-
-Both raster and vector sources supported.
-File-mode contexts (pdf/svg/ps/eps) cannot be used as source.
-
 ```tcl
-# Layer model
-set sky   [tclmcairo::new 600 400]
-set mtn   [tclmcairo::new 600 400]
-set cloud [tclmcairo::new 600 400]
-
-# Draw each layer independently
-$sky   gradient_linear bg 0 0 0 400 {{0 0.5 0.7 1 1} {1 0.7 0.9 1 1}}
-$sky   rect 0 0 600 400 -fillname bg
-$mtn   poly 0 400 150 200 300 300 450 180 600 400 \
-       -fill {0.3 0.4 0.3}
-$cloud circle 150 80 50 -fill {1 1 1 0.7}
-
-# Composite
-$sky blit $mtn   0 0
-$sky blit $cloud 0 0 -alpha 0.8
-
-$sky save "landscape.png"
-$sky destroy; $mtn destroy; $cloud destroy
+# Composite src onto dst at (100, 50) with 70% opacity
+$ctx blit $src 100 50 -alpha 0.7 -operator over
 ```
 
 ---
 
-## Output
+## Transforms
 
-### save
-
-```tcl
-$ctx save filename
-```
-
-Extension determines format: `.png` `.pdf` `.svg` `.ps` `.eps`
-
-For vector/file-mode contexts, saving as `.pdf`/`.svg`/`.ps`/`.eps`
-produces true vector output. Raster contexts always rasterize.
-
-### topng
+All transforms apply to subsequent drawing operations.
 
 ```tcl
-set bytes [$ctx topng]
+$ctx transform -translate dx dy
+$ctx transform -scale sx sy
+$ctx transform -rotate degrees
+$ctx transform -matrix {a b c d tx ty}
+$ctx transform -reset            ;# identity
 ```
-
-Returns PNG as a Tcl bytearray. Works on both raster and vector contexts.
-Vector contexts are rendered to raster first.
 
 ```tcl
-# Write to file without $ctx save
-set bytes [$ctx topng]
-set f [open "out.png" wb]
-puts -nonewline $f $bytes
-close $f
-
-# Use as Tk photo image
-image create photo myimg
-myimg put $bytes -format png
-
-# Send via HTTP (httpd/ncgi)
-set body $bytes
-set content_type "image/png"
+# Rotate text around center
+$ctx push
+$ctx transform -translate 200 150
+$ctx transform -rotate 45
+$ctx text 0 0 "Rotated" -font "Sans 20" -color {1 1 1} -anchor center
+$ctx pop
 ```
 
-### todata
-
+**Query current transform:**
 ```tcl
-set bytes [$ctx todata]
+set m [$ctx transform -get]   ;# {a b c d tx ty}
 ```
 
-Returns raw ARGB32 pixel data (stride × height bytes).
-Raster mode only. Use for Tk photo direct pixel manipulation.
+**Coordinate conversion:**
+```tcl
+lassign [$ctx user_to_device $x $y]   sx sy   ;# user → screen
+lassign [$ctx device_to_user $sx $sy] ux uy   ;# screen → user
+```
 
 ---
 
-## SVG-specific Options
+## Transparency and Compositing
+
+### Global Alpha
 
 ```tcl
-# SVG version (controls which Cairo features are used internally)
-tclmcairo::new 400 300 -mode svg -file out.svg -svg_version 1.1
-tclmcairo::new 400 300 -mode svg -file out.svg -svg_version 1.2  ;# default
-
-# Document unit (appears in SVG width/height attributes)
-tclmcairo::new 210 297 -mode svg -file a4.svg -svg_unit mm
-# -> <svg width="210mm" height="297mm" ...>
-
-tclmcairo::new 800 600 -mode svg -file screen.svg -svg_unit px
-# -> <svg width="800px" height="600px" ...>
+$ctx alpha 0.5   ;# all subsequent drawing at 50% opacity
+$ctx alpha 1.0   ;# reset
 ```
 
-Available units: `pt` (default), `px`, `mm`, `cm`, `in`, `em`, `ex`, `pc`
+### Compositing Operators
 
-**SVG text note:** Cairo always renders text as glyph outlines — no
-`<text>` elements in output. Text is not searchable in SVG viewers.
+```tcl
+$ctx operator over|source|in|out|atop|dest|xor|add|...
+```
 
-**MIME data in SVG:** Both JPEG and PNG are embedded as base64 data URIs
-in SVG (`<image href="data:image/jpeg;base64,...">` etc.).
+```tcl
+# Punch a hole using 'out' operator
+$ctx push
+$ctx operator out
+$ctx circle 200 150 60 -fill {0 0 0 1}
+$ctx pop
+```
+
+### Clip Region
+
+```tcl
+$ctx clip_rect x y width height
+$ctx clip_path "M ..."
+$ctx clip_reset
+```
+
+```tcl
+# Draw only within a circle
+$ctx push
+$ctx clip_path "M 250 150 m -80 0 a 80 80 0 1 0 160 0 a 80 80 0 1 0 -160 0"
+$ctx image "photo.png" 0 0
+$ctx pop
+```
 
 ---
 
-## Build Reference
+## canvas2cairo — Tk Canvas Export
 
-### Linux (TEA)
-
-```bash
-autoconf
-./configure --with-tcl=/usr/lib/tcl8.6
-make
-make test
-make demo              ;# generates 14 demo files in demos/
-
-# Tcl 9
-./configure --with-tcl=/usr/lib/tcl9.0
-make && make test TCLSH=tclsh9.0
-
-# Disable JPEG
-make JPEG=0
-```
-
-### Windows (MSYS2 MINGW64)
-
-```bash
-# Prerequisites
-pacman -S mingw-w64-x86_64-cairo
-pacman -S mingw-w64-x86_64-libjpeg-turbo   # optional
-
-make -f Makefile.win TARGET=mingw64
-make -f Makefile.win TARGET=mingw64 test
-make -f Makefile.win TARGET=mingw64 demo
-```
-
-### Windows (BAWT 3.2)
-
-```cmd
-build-win.bat 86         ;# Tcl 8.6
-build-win.bat 86 nojpeg  ;# without JPEG
-test-win.bat 86
-```
-
-### Environment
+`canvas2cairo` exports Tk Canvas widgets to any tclmcairo output format.
 
 ```tcl
-# Make tclmcairo available without installing
-tcl::tm::path add /path/to/tclmcairo/tcl
-set env(TCLMCAIRO_LIBDIR) /path/to/tclmcairo
-package require tclmcairo
+package require canvas2cairo
+
+# Full export (format from file extension)
+canvas2cairo::export .canvas output.svg
+canvas2cairo::export .canvas output.pdf
+canvas2cairo::export .canvas output.png
+
+# Render into existing context (for embedding or positioning)
+set ctx [tclmcairo::new 595 842 -mode pdf -file "page.pdf"]
+$ctx push
+$ctx transform -translate 50 100
+canvas2cairo::render .canvas $ctx
+$ctx pop
+$ctx finish; $ctx destroy
 ```
+
+**Supported items:** rectangle, oval, line, polygon, text, arc, image  
+**Not supported:** window (embedded widgets), bitmap, stipple patterns
+
+**Before export, always call:**
+```tcl
+update idletasks   ;# ensures Tk has rendered all items
+```
+
+See `docs/canvas2cairo.md` for full documentation.
+
+---
+
+## shape_renderer — Shape Icons
+
+`shape_renderer` draws Cairo-based shape icons for use in diagrams.
+
+```tcl
+package require shape_renderer
+
+# Render directly to file (recommended)
+shape_renderer::render_to_file server 64 64 /tmp/icon.png \
+    -color {0.35 0.35 0.6}
+
+# Use in Tk Canvas
+set img [image create photo -file /tmp/icon.png]
+.canvas create image $x $y -image $img -anchor nw
+
+# Clear cache after zoom changes
+shape_renderer::clear_cache
+```
+
+**Available shapes:**
+
+| Category | Shapes |
+|----------|--------|
+| Network | `router` `switch` `server` `firewall` `accesspoint` `wifi` `fiber` |
+| End-user | `workstation` `printer` `scanner` `phone` |
+| Infrastructure | `database` `building` `cloud` |
+| Generic | `generic` `table` |
 
 ---
 
 ## Demos
 
+Run all demos from the `demos/` directory:
+
 ```bash
-make demo
-make demo TCLSH=tclsh9.0
+# API demos (18 examples: shapes, gradients, text, PDF, compositing...)
+TCLMCAIRO_LIBDIR=. tclsh demos/demo-tclmcairo.tcl
+
+# canvas2cairo: Tk Canvas → SVG/PDF
+wish demos/demo-canvas2cairo.tcl
+
+# Interactive: Canvas vs Cairo export side by side
+wish demos/canvas_explorer.tcl
+
+# Node editor application
+wish demos/nodeeditor.tcl
+
+# Cairo samples (ports of cairographics.org examples)
+TCLMCAIRO_LIBDIR=. tclsh examples/run_all.tcl
 ```
-
-| # | File | Content |
-|---|------|---------|
-| 1 | demo-shapes | rect, circle, ellipse, line, poly, arc |
-| 2 | demo-paths | SVG paths, fillrule evenodd |
-| 3 | demo-gradients | linear + radial gradients |
-| 4 | demo-text | fonts, metrics, anchors |
-| 5 | demo-output | A4 PDF vector |
-| 6 | demo-multipage | 3-page PDF |
-| 7 | demo-clip | clip_rect, clip_path, push/pop |
-| 8 | demo-textpath | gradient/outline/shadow/clipped text |
-| 9 | demo-transparent | PNG transparency, alpha |
-| 10 | demo-blit | layer compositing |
-| 11 | demo-png-formats | argb32/rgb24/a8, topng, image_data |
-| 12 | demo-mime | JPEG MIME embedding (~25% smaller PDF) |
-| 13 | demo-plotchart | Plotchart-style chart with clip_rect |
-| 14 | demo-matrix | -matrix transforms and -get CTM |
-| 15 | demo-operators | Compositing operators (16 blend modes) |
-| 16 | demo-coords | user_to_device, arc_negative, -dash_offset |
-| 17 | demo-gradient-ops | gradient_extend, filter, paint, set_source |
-| 18 | demo-prio3 | font_options, path_get, surface_copy |
-
----
-
-
----
-
-## 0.3 Features
-
-### Compositing Operator
-
-```tcl
-$ctx operator OVER|MULTIPLY|SCREEN|OVERLAY|DARKEN|LIGHTEN|DIFFERENCE|XOR|...
-```
-
-Sets how new drawing combines with existing pixels. Default is `OVER`.
-29 operators total: full Porter-Duff set + CSS blend modes.
-
-### Coordinate Mapping
-
-```tcl
-set d [$ctx user_to_device 10 20]   ;# -> {dx dy} in device space
-set u [$ctx device_to_user 60 70]   ;# -> {x y} in user space
-```
-
-Essential for mouse interaction when transforms are active.
-
-### arc_negative
-
-```tcl
-$ctx arc_negative cx cy r start_deg end_deg ?opts?
-```
-
-Counter-clockwise arc. Equivalent to `cairo_arc_negative`.
-
-### -dash_offset
-
-```tcl
-$ctx line 0 0 400 0 -dash {10 5} -dash_offset 3
-```
-
-Starting offset into the dash pattern (third parameter of `cairo_set_dash`).
-
-### gradient_extend / gradient_filter
-
-```tcl
-$ctx gradient_extend name none|pad|repeat|reflect
-$ctx gradient_filter name fast|good|best|nearest|bilinear
-```
-
-### paint / set_source
-
-```tcl
-$ctx set_source -color {r g b ?a?}   ;# set Cairo source
-$ctx set_source -gradient name
-$ctx paint ?alpha?                    ;# fill entire surface with source
-```
-
-### recording_bbox
-
-```tcl
-set bb [$ctx recording_bbox]   ;# -> {x y w h}  (vector mode only)
-```
-
-### font_options
-
-```tcl
-$ctx font_options -antialias gray -hint_style full -hint_metrics on
-set fo [$ctx font_options]   ;# get current settings
-```
-
-### path_get
-
-```tcl
-set svg [$ctx path_get]   ;# -> "M x y L x y ..." or ""
-```
-
-Path is cleared by Cairo after `stroke`/`fill` — call `path_get` before drawing.
-
-### surface_copy
-
-```tcl
-set cid [$ctx surface_copy]          ;# same size, blank
-set cid [$ctx surface_copy 200 150]  ;# custom size
-tclmcairo circle $cid 100 75 50 -fill {1 0.5 0}
-tclmcairo destroy $cid
-```
-
-### Low-Level Path API
-
-Direct Cairo path commands for porting C examples:
-
-```tcl
-$ctx move_to x y           $ctx rel_move_to dx dy
-$ctx line_to x y           $ctx rel_line_to dx dy
-$ctx curve_to x1 y1 x2 y2 x3 y3
-$ctx rel_curve_to dx1 dy1 dx2 dy2 dx3 dy3
-$ctx close_path            $ctx new_path       $ctx new_sub_path
-$ctx stroke                $ctx fill
-$ctx fill_preserve         $ctx stroke_preserve
-$ctx set_line_width n      $ctx set_line_cap butt|round|square
-$ctx set_line_join miter|round|bevel
-$ctx set_fill_rule winding|evenodd
-$ctx set_source_rgb r g b  $ctx set_source_rgba r g b a
-```
-
-## Known Limitations
-
-- **Text:** Cairo Toy Font API — no HarfBuzz, no BiDi, no complex script
-  shaping (Arabic, Devanagari, etc.). Use Pango for complex text.
-- **Thread safety:** NOT thread-safe. One context per thread.
-- **SVG text:** Always rendered as glyph outlines, not `<text>` elements.
-- **PNG MIME in PDF:** Cairo's PDF backend re-encodes PNG as pixel data —
-  only JPEG benefits from MIME embedding. PNG MIME works in SVG.
 
 ---
 
 ## License
 
-BSD 2-Clause — see `LICENSE`.
+tclmcairo: **BSD 2-Clause** — see `LICENSE`.
 
-```
-Copyright (c) 2026 gregnix
-Redistribution and use in source and binary forms, with or without
-modification, are permitted provided that the following conditions are met:
-1. Redistributions of source code must retain the above copyright notice...
-2. Redistributions in binary form must reproduce the above copyright notice...
-```
+Dependencies:
+- Cairo — LGPL 2.1 or MPL 1.1 (dynamically linked)
+- libjpeg — IJG License (optional)

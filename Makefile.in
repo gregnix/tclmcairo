@@ -30,14 +30,14 @@ TCL_SRC_DIR = @TCL_SRC_DIR@
 TCL_VERSION = @TCL_VERSION@
 # Override: make TCLSH=tclsh9.0 test
 TCLSH        = tclsh
-INSTALL     = @INSTALL@
-INSTALL_DATA= @INSTALL_DATA@
-INSTALL_PROGRAM = @INSTALL_PROGRAM@
-INSTALL_SCRIPT = @INSTALL_SCRIPT@
+INSTALL         = install
+INSTALL_DATA    = install -m 644
+INSTALL_PROGRAM = install -m 755
+INSTALL_SCRIPT  = install -m 755
 
 prefix      = @prefix@
 exec_prefix = @exec_prefix@
-libdir      = @libdir@
+libdir      = $(prefix)/lib/tcltk
 includedir  = @includedir@
 datarootdir = @datarootdir@
 datadir     = @datadir@
@@ -97,8 +97,9 @@ install: all install-binaries install-libraries
 
 install-binaries:
 	@mkdir -p $(PACKAGE_DIR)
-	$(INSTALL_PROGRAM) $(PKG_LIB_FILE) $(PACKAGE_DIR)/$(PKG_LIB_FILE)
-	$(INSTALL_DATA)    pkgIndex.tcl    $(PACKAGE_DIR)/pkgIndex.tcl
+	$(INSTALL_PROGRAM) $(TCLMCAIRO_SO)  $(PACKAGE_DIR)/$(TCLMCAIRO_SO)
+	$(INSTALL_DATA)    pkgIndex.tcl     $(PACKAGE_DIR)/pkgIndex.tcl
+	@echo "Installed: $(PACKAGE_DIR)"
 
 install-libraries:
 	@mkdir -p $(PACKAGE_DIR)

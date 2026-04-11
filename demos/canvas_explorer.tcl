@@ -715,10 +715,11 @@ proc ::ce::doExport {} {
 
     catch { image delete $export_img }
     if {[catch { set export_img [image create photo -file $tmpf] } err]} {
-        catch { .main.center.cairo.diff configure \
-            -text "Bild-Fehler: $err" -foreground "#cc0000" }
+        catch { .main.center.cairo.diff configure             -text "Bild-Fehler: $err" -foreground "#cc0000" }
+        catch { file delete $tmpf }
         return
     }
+    catch { file delete $tmpf }
 
     set ow [image width  $export_img]
     set oh [image height $export_img]

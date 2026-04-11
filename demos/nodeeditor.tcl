@@ -272,7 +272,7 @@ proc ::demo::saveToFile {} {
     set ::demo::statusVar "Saved: $file"
 }
 
-proc ::demo::loadFromFile {} {
+proc ::demo::loadFromFile {args} {
     variable data
     variable currentFile
 
@@ -889,6 +889,7 @@ proc ::demo::drawNode {id} {
         set tmpf "/tmp/ne_${safek}.png"
         shape_renderer::render_to_file $ntype $ico_size $ico_size $tmpf -color $ic
         set shapeImages($ikey) [image create photo -file $tmpf]
+        catch { file delete $tmpf }
     }
 
     set ico_x [expr {$x + 6}]
@@ -1222,14 +1223,52 @@ proc ::demo::exportFile {ext} {
             {"SVG Files" .svg} {"PDF Files" .pdf} {"All Files" *}] \
         -title "Export as [string toupper $ext]"]
     if {$file eq ""} return
+
+    # Compute bbox BEFORE exportCleanup (cleanup removes/hides items)
+    set bbox [$canvas bbox node]
+    if {$bbox eq ""} { set bbox [$canvas bbox all] }
+    set vp ""
+    if {$bbox ne ""} {
+        lassign $bbox bx1 by1 bx2 by2
+        set pad 40
+        set vp [list [expr {$bx1-$pad}] [expr {$by1-$pad}]                      [expr {$bx2+$pad}] [expr {$by2+$pad}]]
+    }
+
     exportCleanup
-    if {[catch {canvas2cairo::export $canvas $file} err]} {
+
+    # Use same approach as exportRegionVector (avoids canvas2cairo::export
+    # scrollregion-size bug when no viewport or scrollregion is large):
+    # tclmcairo::new with exact dimensions + transform -translate + canvas2cairo::render
+    set mode [switch $ext { svg {expr {"svg"}} pdf {expr {"pdf"}} ps {expr {"ps"}} eps {expr {"eps"}} default {expr {"svg"}}}]
+
+    if {$vp ne ""} {
+        lassign $vp vx1 vy1 vx2 vy2
+        set pw [expr {int($vx2-$vx1)}]
+        set ph [expr {int($vy2-$vy1)}]
+    } else {
+        # Fallback: use canvas widget size
+        set vx1 0; set vy1 0
+        set pw [winfo width $canvas]
+        set ph [winfo height $canvas]
+    }
+
+    set ok [catch {
+        set ctx [tclmcairo::new $pw $ph -mode $mode -file $file]
+        $ctx push
+        $ctx transform -translate [expr {-double($vx1)}] [expr {-double($vy1)}]
+        canvas2cairo::render $canvas $ctx
+        $ctx pop
+        $ctx finish
+        $ctx destroy
+    } err]
+
+    if {$ok} {
         tk_messageBox -icon error -message "Export failed:\n$err"
         exportRestore
         return
     }
     exportRestore
-    set ::demo::statusVar "Exported: $file"
+    set ::demo::statusVar "Exported ${pw}×${ph}px → $file"
 }
 
 # ============================================================

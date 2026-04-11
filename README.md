@@ -3,9 +3,9 @@
 A lightweight Cairo binding for Tcl — no Tk required.
 Runs in `tclsh`. Outputs PNG, PDF, SVG, PS, EPS.
 
-**Version:** 0.3.1 · **License:** BSD · **Tcl:** 8.6 / 9.0  
+**Version:** 0.3.2 · **License:** BSD · **Tcl:** 8.6 / 9.0  
 **Platform:** Linux, Windows (MSYS2 MINGW64, BAWT 3.2), macOS  
-**Tests:** 181/181 (Linux) · 170/170 (Windows)
+**Tests:** 186/186 (Linux tclmcairo) · 63/63 (Linux canvas2cairo) · 170/170 (Windows)
 
 ---
 
@@ -117,6 +117,16 @@ make demo      # generate demo PNGs
 make samples   # generate examples/SAMPLES.md
 ```
 
+For a custom Tcl installation (e.g. self-compiled):
+
+```bash
+autoconf && ./configure --with-tcl=/path/to/tcl/lib
+make && make test
+```
+
+Note: `TEA_PRIVATE_TCL_HEADERS` has been removed — only the installed
+headers are needed. No Tcl source tree required.
+
 ### Windows
 
 ```bash
@@ -134,7 +144,7 @@ See `INSTALL.md` for installation instructions.
 
 After `make install` all files land in one directory:
 ```
-/usr/lib/tcltk/tclmcairo0.3.1/   libtclmcairo.so  pkgIndex.tcl
+/usr/lib/tcltk/tclmcairo0.3.2/   libtclmcairo.so  pkgIndex.tcl
                                 tclmcairo-0.3.tm  canvas2cairo-0.1.tm
 ```
 
@@ -168,6 +178,7 @@ wish demos/demo-canvas2cairo.tcl  # canvas2cairo showcase
 | 16 | user_to_device, arc_negative, -dash_offset |
 | 17 | gradient_extend, gradient_filter, paint, set_source |
 | 18 | font_options, path_get, surface_copy |
+| 19 | save -chan: PNG/PDF/SVG to open channel |
 
 **`demos/nodeeditor.tcl`** — full node editor application:
 - Drag-and-drop nodes, port-to-port connections

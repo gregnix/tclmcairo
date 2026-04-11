@@ -1,6 +1,6 @@
 # canvas2cairo — API Reference
 
-Version 0.1 · BSD License · Requires: tclmcairo + Tk
+Version 0.1 · tclmcairo 0.3.2 · BSD License · Requires: tclmcairo + Tk
 
 ---
 
@@ -40,9 +40,26 @@ file extension:
 canvas2cairo::export .c output.svg
 canvas2cairo::export .c output.pdf
 canvas2cairo::export .c output.png
+
+# HiDPI export (2× resolution)
+canvas2cairo::export .c output.png -scale 2.0
+
+# Export a specific region only
+canvas2cairo::export .c output.svg -viewport {50 50 600 400}
+
+# Combined: region + scale
+canvas2cairo::export .c output.png -viewport {0 0 400 300} -scale 2.0
 ```
 
-**Canvas size:** reads `[$canvas cget -width/height]`.
+**Options:**
+
+| Option | Values | Default | Description |
+|--------|--------|---------|-------------|
+| `-scale` | float | `1.0` | Output scale factor (HiDPI) |
+| `-viewport` | `{x1 y1 x2 y2}` | — | Export only this canvas region |
+
+**Canvas size:** reads `[$canvas cget -width/height]`. Scrollregion is honoured
+(including negative origins like `{-500 -500 1000 1000}`).
 
 ---
 
@@ -50,12 +67,16 @@ canvas2cairo::export .c output.png
 
 ```tcl
 canvas2cairo::render canvas ctx
+canvas2cairo::render canvas ctx -clip {x1 y1 x2 y2}
 ```
 
 Renders the canvas into an existing tclmcairo context. Useful for:
 - Embedding a canvas into a larger document
 - Placing a canvas at a specific position on a page
 - Combining multiple canvases on one page
+
+The optional `-clip` argument restricts rendering to the given canvas
+coordinate region. Items completely outside the clip are skipped.
 
 ```tcl
 # Embed canvas in a PDF page with a title above it
@@ -69,6 +90,9 @@ canvas2cairo::render .chart $ctx
 $ctx pop
 $ctx finish
 $ctx destroy
+
+# Render only a region of the canvas
+canvas2cairo::render .canvas $ctx -clip {100 100 600 500}
 ```
 
 ---
@@ -107,6 +131,9 @@ $ctx destroy
 | `-width` (text) | `_wrap_text` word-wrap | uses `font measure` |
 | `-state hidden` | skipped | item not rendered |
 | `-stipple` | — | not supported, renders solid |
+| `-justify left/center/right` | per-line x offset | multiline text only |
+| `-underline n` | line under char n | |
+| `-arrowshape {d1 d2 d3}` | custom arrow size | d1=tip d2=wing d3=width |
 
 ---
 
@@ -192,6 +219,41 @@ canvas2cairo skips them with an optional stderr message.
 # Uncomment in canvas2cairo-0.1.tm to debug:
 # puts stderr "canvas2cairo: skipping window item $id"
 ```
+
+### 9. Scroll Position
+
+When a canvas is scrolled, `canvasx(0)/canvasy(0)` gives the current origin.
+`render` reads this automatically — the export reflects the current scroll
+position unless `-viewport` is specified.
+
+### 10. Negative Scrollregion
+
+Scrollregions with negative origins (e.g. `{-500 -500 1000 1000}`) are handled
+correctly — the origin offset is applied as a translation.
+
+### 11. polygon -fill ""
+
+An empty fill string means transparent (no fill), not black.
+Only the outline is drawn.
+
+### 12. -smooth raw
+
+Tk `-smooth raw` passes explicit cubic Bézier control points.
+canvas2cairo converts these to SVG `C` path commands correctly.
+
+### 13. -smooth 1
+
+Tk B-spline: original points are control points, midpoints are on-curve.
+canvas2cairo 0.3.2 uses **Catmull-Rom** spline — the curve passes through
+all original points (tension 0.5), mapped to cubic Bézier segments.
+More accurate than the previous quadratic B-spline approximation.
+
+### 14. Performance: bbox clipping
+
+Items completely outside the export viewport are skipped.
+The clip region is derived from the `-viewport` option, not the widget size.
+(Using widget size as clip was a bug — it caused items at off-screen canvas
+coordinates to be silently dropped.)
 
 ---
 

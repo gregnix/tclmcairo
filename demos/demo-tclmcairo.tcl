@@ -1713,5 +1713,48 @@ $canvas save $f
 $canvas destroy
 puts "  -> $f"
 
+# ============================================================
+puts "Demo 19: save -chan (channel output)..."
+
+# Draw a simple badge
+set d19 [tclmcairo::new 300 200]
+$d19 clear 0.08 0.08 0.15
+
+$d19 gradient_linear bg 0 0 300 0 \
+    {{0 0.2 0.5 0.9 1} {0.5 0.1 0.3 0.7 1} {1 0.05 0.15 0.4 1}}
+$d19 rect 0 0 300 200 -fillname bg
+
+$d19 gradient_radial glow 150 100 90 \
+    {{0 1.0 0.9 0.3 0.6} {1 0 0 0 0}}
+$d19 circle 150 100 80 -fillname glow
+
+$d19 text 150 90 "save" -font "Sans Bold 28" \
+    -color {1 1 1} -anchor center
+$d19 text 150 118 "-chan" -font "Monospace Bold 20" \
+    -color {0.8 0.9 1} -anchor center
+
+# PNG via channel
+set f19png [file join $outdir demo-chan.png]
+set ch [open $f19png wb]
+$d19 save -chan $ch -format png
+close $ch
+puts "  -> $f19png (PNG via channel)"
+
+# PDF via channel
+set f19pdf [file join $outdir demo-chan.pdf]
+set ch [open $f19pdf wb]
+$d19 save -chan $ch -format pdf
+close $ch
+puts "  -> $f19pdf (PDF via channel, [file size $f19pdf] bytes)"
+
+# SVG via channel
+set f19svg [file join $outdir demo-chan.svg]
+set ch [open $f19svg wb]
+$d19 save -chan $ch -format svg
+close $ch
+puts "  -> $f19svg (SVG via channel)"
+
+$d19 destroy
+
 puts "\nAll demos complete."
 puts "Output files in directory: $outdir"

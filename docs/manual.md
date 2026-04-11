@@ -2,8 +2,7 @@
 
 Cairo 2D graphics for Tcl. No Tk required. Runs in `tclsh`.
 
-**Version:** 0.3.1 · **License:** BSD · **Tcl:** 8.6 / 9.0  
-**Platform:** Linux, Windows (MSYS2, BAWT), macOS  
+**Version:** 0.3.2 · **License:** BSD · **Tcl:** 8.6 / 9.0  **Platform:** Linux, Windows (MSYS2, BAWT), macOS  
 **Repository:** https://github.com/gregnix/tclmcairo
 
 ---
@@ -171,6 +170,13 @@ $ctx destroy
 **Get PNG bytes** (for embedding in Tk, etc.):
 ```tcl
 set bytes [$ctx topng]   ;# raw PNG bytearray
+```
+
+**Write to channel** (Memchan, socket, pipe — new in 0.3.2):
+```tcl
+set ch [open output.pdf wb]
+$ctx save -chan $ch -format pdf   ;# pdf svg ps eps png
+close $ch
 ```
 
 ---
@@ -487,7 +493,13 @@ canvas2cairo::export .canvas output.svg
 canvas2cairo::export .canvas output.pdf
 canvas2cairo::export .canvas output.png
 
-# Render into existing context (for embedding or positioning)
+# HiDPI export
+canvas2cairo::export .canvas output.png -scale 2.0
+
+# Export only a region
+canvas2cairo::export .canvas output.svg -viewport {50 50 600 400}
+
+# Render into existing context (embedding)
 set ctx [tclmcairo::new 595 842 -mode pdf -file "page.pdf"]
 $ctx push
 $ctx transform -translate 50 100
@@ -497,6 +509,9 @@ $ctx finish; $ctx destroy
 ```
 
 **Supported items:** rectangle, oval, line, polygon, text, arc, image  
+**New in 0.3.2:** `-smooth raw/1`, `-underline`, `-arrowshape`, `-justify`,
+`-scale`, `-viewport`, scroll position, negative scrollregion, polygon outline-only,
+`_apply_render` namespace fix, `clip_bbox` fix  
 **Not supported:** window (embedded widgets), bitmap, stipple patterns
 
 **Before export, always call:**

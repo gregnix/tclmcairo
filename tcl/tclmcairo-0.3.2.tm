@@ -44,7 +44,7 @@
 #
 #   $ctx destroy
 
-package provide tclmcairo 0.3.1
+package provide tclmcairo 0.3.2
 
 namespace eval ::tclmcairo {
     variable _libloaded 0
@@ -71,7 +71,7 @@ namespace eval ::tclmcairo {
             [pwd] \
             [file join [pwd] lib] \
         ]
-        # Windows split layout: .tm in lib/tcl8/8.6/ → .dll in lib/tclmcairo0.3.1/
+        # Windows split layout: .tm in lib/tcl8/8.6/ → .dll in lib/tclmcairo0.3.2/
         # Go up 2 levels from tmdir and search for tclmcairo* subdirs
         set _parent2 [file normalize [file join $_tmdir .. ..]]
         foreach _pkgdir [glob -nocomplain -directory $_parent2 tclmcairo*] {
@@ -152,7 +152,7 @@ oo::class create tclmcairo::context {
     # -- Basic operations --
     method clear   {r g b {a 1.0}}             { tclmcairo clear   $_id $r $g $b $a }
     method size    {}                           { tclmcairo size    $_id }
-    method save    {filename}                   { tclmcairo save    $_id $filename }
+    method save    {args}                       { tclmcairo save    $_id {*}$args }
     method todata  {}                           { tclmcairo todata  $_id }
 
     # -- Drawing commands --

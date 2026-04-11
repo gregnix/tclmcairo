@@ -1,6 +1,6 @@
 # tclmcairo — API Reference
 
-Version 0.3.1 · BSD License
+Version 0.3.2 · BSD License
 
 ---
 
@@ -35,6 +35,7 @@ set ctx [tclmcairo::new 210 297 -mode svg -file "a4.svg" -svg_unit mm]
 $ctx clear r g b ?a?   ;# background fill, 0.0-1.0
 $ctx size              ;# -> {width height}
 $ctx save filename     ;# .png .pdf .svg .ps .eps
+$ctx save -chan ch ?-format pdf|svg|ps|eps|png?  ;# write to open channel
 $ctx topng             ;# -> PNG bytearray (raster + vector)
 $ctx todata            ;# -> raw ARGB32 bytes (raster only, for Tk photo)
 $ctx newpage           ;# next page (pdf|svg|ps|eps)
@@ -459,6 +460,32 @@ Composites `src` context onto `$ctx`. Both raster and vector sources work.
 | `.svg` | True vectors; text always as path outlines |
 | `.ps` | PostScript |
 | `.eps` | For LaTeX, InDesign |
+
+---
+
+## Important: Path Isolation
+
+Every high-level shape command (`rect`, `circle`, `ellipse`, `arc`,
+`arc_negative`, `line`, `poly`) internally calls `cairo_new_path()` before
+adding geometry. This prevents the implicit connecting line Cairo draws
+between consecutive shape commands when a current point exists.
+
+When using the **low-level path API** (`move_to`, `line_to`, `curve_to`...),
+call `new_path` explicitly to start a fresh path:
+
+```tcl
+$ctx new_path
+$ctx move_to 10 10
+$ctx line_to 100 50
+$ctx stroke
+```
+
+The high-level commands are safe to call in sequence without `new_path`:
+
+```tcl
+$ctx circle 50 50 20 -fill {1 0 0}   ;# new_path called internally
+$ctx circle 100 50 20 -fill {0 1 0}  ;# new_path called internally — no stray line
+```
 
 ---
 

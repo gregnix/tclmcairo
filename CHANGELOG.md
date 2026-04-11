@@ -1,5 +1,93 @@
 # tclmcairo Changelog
 
+## v0.3.2 (2026-04-11)
+
+### New Features
+
+**`save -chan channel`** — write output to an open Tcl channel:
+
+```tcl
+# PDF to channel (Memchan, socket, pipe)
+set ch [open output.pdf wb]
+$ctx save -chan $ch -format pdf
+close $ch
+
+# PNG to channel
+set ch [open image.png wb]
+$ctx save -chan $ch -format png
+close $ch
+```
+
+Supported formats: `pdf` `svg` `ps` `eps` `png`. Works with raster and vector contexts.
+
+### Bug Fixes
+
+**`cairo_new_path()` before every shape command** — critical fix:
+
+Cairo's path API accumulates points. Without `cairo_new_path()`, a new shape
+inherits the previous current point and Cairo draws an implicit connecting line.
+This caused stray lines in PDF/SVG exports (e.g. port-dot connected to distant
+text position).
+
+Fixed in all 7 shape commands in `src/libtclmcairo.c`:
+`rect`, `line`, `circle`, `ellipse`, `arc`, `arc_negative`, `poly`
+
+### canvas2cairo-0.1.tm (19 changes vs 0.3.1)
+
+| Change | Description |
+|--------|-------------|
+| `-smooth 1` → Catmull-Rom | Curve passes through all points (cubic, tension 0.5) |
+| `render -clip {x1 y1 x2 y2}` | Restrict rendering to canvas region |
+| `text_extents` for justify | Cairo `font_measure` for center/right alignment |
+| `-smooth raw` | Correct cubic Bézier (`C` commands) |
+| `-underline` | Underline under specified character |
+| `-arrowshape` | Custom arrow size respected |
+| `-justify` | Multi-line text left/center/right |
+| `hidden item bug` | `return` → `continue` (one hidden item broke export) |
+| `-dashoffset` | Tested and verified |
+| `export -scale` | HiDPI export (e.g. `-scale 2.0`) |
+| `export -viewport` | Region export `{x1 y1 x2 y2}` |
+| scroll position | `canvasx(0)/canvasy(0)` — scrolled canvas correct |
+| negative scrollregion | `{-500 -500 1000 1000}` — origin offset correct |
+| `-background` | Canvas background always exported |
+| `polygon -fill ""` | Empty fill → outline only, no fill |
+| `_apply_render` | Extracted from `export` (namespace bug fixed) |
+| `clip_bbox bug` | Items outside widget size were wrongly skipped |
+| exportFile fix | Full-diagram export: direct `tclmcairo::new + render` |
+
+### shape_renderer-0.1.tm
+
+7 new shapes: `printer` `scanner` `accesspoint` `phone` `wifi` `fiber` `building`  
+Total: 15 shapes
+
+### Tests
+
+181/181 tclmcairo ✔  42/42 canvas2cairo ✔
+
+---
+
+## v0.3.1 (2026-04-10)
+
+### canvas2cairo-0.1.tm (initial release)
+
+- PNG export
+- Image items (`$img write` instead of base64)
+- Text wrapping (`_wrap_text` with `font measure`)
+- Multi-line text (`cairo_show_text` single-line fix)
+- `-smooth raw` (cubic Bézier)
+- `-smooth 1` (B-spline)
+- edgehit stipple lines suppressed before export
+
+### shape_renderer-0.1.tm (initial release)
+
+8 shapes: `router` `switch` `server` `firewall` `database` `workstation` `generic` `table`
+
+### demos/nodeeditor.tcl (new)
+
+Full node editor application with canvas2cairo export.
+
+---
+
 ## v0.3 (2026-04-09)
 
 ### New Features

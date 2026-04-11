@@ -1780,9 +1780,9 @@ test lowlevel-1.16 {rel_move_to moves current point} -body {
 # ================================================================
 
 # Fix 1: package version consistency
-test robustness-1.0 {package version is 0.3.1} -body {
+test robustness-1.0 {package version is 0.3.2} -body {
     package present tclmcairo
-} -result 0.3.1
+} -result 0.3.2
 
 # Fix 5: low-level commands check argument count
 test robustness-1.1 {move_to requires x y} -body {
@@ -1850,6 +1850,73 @@ test robustness-3.2 {path with truncated data does not crash} -body {
     set ctx [tclmcairo::new 100 100]
     catch { $ctx path "M 10 10 L 50" -stroke {1 0 0} -width 1 }
     set ok 1; $ctx destroy; set ok
+} -result 1
+
+# ================================================================
+# save -chan (new in 0.3.2)
+# ================================================================
+
+test save-chan-1 {save -chan -format png writes PNG bytes} -body {
+    set ctx [tclmcairo::new 100 100]
+    $ctx clear 0.2 0.4 0.8
+    $ctx circle 50 50 30 -fill {1 0.5 0}
+    set f [file join /tmp test_chan_[pid].png]
+    set ch [open $f wb]
+    $ctx save -chan $ch -format png
+    close $ch
+    $ctx destroy
+    set sz [file size $f]
+    file delete -force $f
+    expr {$sz > 100}
+} -result 1
+
+test save-chan-2 {save -chan -format pdf writes PDF bytes} -body {
+    set ctx [tclmcairo::new 200 200]
+    $ctx clear 1 1 1
+    $ctx rect 20 20 160 160 -fill {0.8 0.2 0.2}
+    set f [file join /tmp test_chan_[pid].pdf]
+    set ch [open $f wb]
+    $ctx save -chan $ch -format pdf
+    close $ch
+    $ctx destroy
+    set hdr [read [set fh [open $f rb]] 5]; close $fh
+    file delete -force $f
+    string match "%PDF*" $hdr
+} -result 1
+
+test save-chan-3 {save -chan -format svg writes SVG bytes} -body {
+    set ctx [tclmcairo::new 100 100]
+    $ctx clear 1 1 1
+    $ctx circle 50 50 40 -stroke {0 0 1} -width 2
+    set f [file join /tmp test_chan_[pid].svg]
+    set ch [open $f wb]
+    $ctx save -chan $ch -format svg
+    close $ch
+    $ctx destroy
+    set hdr [read [set fh [open $f r]] 20]; close $fh
+    file delete -force $f
+    expr {[string match "*xml*" $hdr] || [string match "*svg*" $hdr] || [string length $hdr] > 5}
+} -result 1
+
+test save-chan-4 {save -chan -format png from vector context} -body {
+    set ctx [tclmcairo::new 100 100 -mode vector]
+    $ctx rect 10 10 80 80 -fill {0.5 0.8 0.3}
+    set f [file join /tmp test_chan_vec_[pid].png]
+    set ch [open $f wb]
+    $ctx save -chan $ch -format png
+    close $ch
+    $ctx destroy
+    set sz [file size $f]
+    file delete -force $f
+    expr {$sz > 100}
+} -result 1
+
+test save-chan-5 {save -chan unknown channel gives error} -body {
+    set ctx [tclmcairo::new 100 100]
+    set err ""
+    catch { $ctx save -chan nosuch_channel_xyz -format pdf } err
+    $ctx destroy
+    expr {$err ne ""}
 } -result 1
 
 # ================================================================

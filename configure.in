@@ -19,7 +19,7 @@
 #   ./configure --with-tcl=/usr/lib/tcl8.6 --disable-jpeg
 #-----------------------------------------------------------------------
 
-AC_INIT([tclmcairo], [0.3.1])
+AC_INIT([tclmcairo], [0.3.2])
 
 TEA_INIT([3.9])
 
@@ -123,7 +123,7 @@ TEA_ADD_INCLUDES([])
 TEA_ADD_LIBS([-lm])
 TEA_ADD_CFLAGS([])
 TEA_ADD_STUB_SOURCES([])
-TEA_ADD_TCL_SOURCES([tcl/tclmcairo-0.3.1.tm tcl/canvas2cairo-0.1.tm tcl/shape_renderer-0.1.tm])
+TEA_ADD_TCL_SOURCES([tcl/tclmcairo-0.3.2.tm tcl/canvas2cairo-0.1.tm tcl/shape_renderer-0.1.tm])
 
 #--------------------------------------------------------------------
 # Tcl Public Headers
@@ -135,7 +135,10 @@ TEA_PUBLIC_TCL_HEADERS
 # Wir haben keine Tk-Abhängigkeit
 #--------------------------------------------------------------------
 
-TEA_PRIVATE_TCL_HEADERS
+# tclmcairo uses only public Tcl API (stubs) — private headers not needed.
+# TEA_PRIVATE_TCL_HEADERS removed: it requires the Tcl source tree which
+# users building from an installed Tcl (e.g. custom prefix or distro package)
+# don't have. tclInt.h is not included anywhere in libtclmcairo.c.
 
 #--------------------------------------------------------------------
 # Shared Library

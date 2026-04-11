@@ -8,7 +8,7 @@ PKG_OBJECTS  =  libtclmcairo.o
 
 # VPATH: .c Dateien in Unterverzeichnissen finden
 VPATH = ./src
-PKG_TCL_SOURCES =  tcl/tclmcairo-0.3.tm tcl/canvas2cairo-0.1.tm
+PKG_TCL_SOURCES =  tcl/tclmcairo-0.3.2.tm tcl/canvas2cairo-0.1.tm
 PKG_HEADERS  = 
 PKG_LIB_FILE = libtclmcairo
 PKG_DIR      = $(PACKAGE_NAME)$(PACKAGE_VERSION)

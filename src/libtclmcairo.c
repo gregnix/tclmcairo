@@ -139,7 +139,7 @@ typedef struct {
 /* Context                                                             */
 /* ================================================================== */
 
-#define MAX_CTX 64
+#define MAX_CTX 256
 
 typedef struct {
     int              id;
@@ -1025,6 +1025,14 @@ static int CairoSaveCmd(ClientData cd, Tcl_Interp *interp,
                 Tcl_ObjPrintf("channel not found: %s", chanName));
             return TCL_ERROR;
         }
+        /* Fix: check channel is writable */
+        if (!(mode & TCL_WRITABLE)) {
+            Tcl_SetObjResult(interp,
+                Tcl_ObjPrintf("channel \"%s\" is not writable", chanName));
+            return TCL_ERROR;
+        }
+        /* Fix: ensure binary translation — prevents \n→\r\n corruption on Windows */
+        Tcl_SetChannelOption(interp, chan, "-translation", "binary");
         /* Determine format from optional 6th arg: -format pdf|svg|ps|eps|png */
         const char *fmt = "pdf";
         if (objc >= 7 && strcmp(Tcl_GetString(objv[5]), "-format") == 0) {
@@ -2249,6 +2257,62 @@ static int CairoSetSourceCmd(ClientData cd, Tcl_Interp *interp,
 /* tclmcairo font_options id ?-antialias default|none|gray|subpixel?  */
 /*                            ?-hint_style none|slight|medium|full?   */
 /*                            ?-hint_metrics on|off|default?          */
+/* ================================================================== */
+/* text_extents: measure text dimensions without drawing              */
+/* Usage: $ctx text_extents text ?-font "Sans 12"?                    */
+/* Returns: dict with width height x_bearing y_bearing x_advance      */
+/* ================================================================== */
+static int CairoTextExtentsCmd(ClientData cd, Tcl_Interp *interp,
+    int objc, Tcl_Obj *const objv[])
+{
+    (void)cd;
+    if (objc < 4) {
+        Tcl_WrongNumArgs(interp, 2, objv, "id text ?-font fontspec?");
+        return TCL_ERROR;
+    }
+    int id; GET_INT(interp, objv[2], id);
+    CairoCtx *c = ctx_find(id);
+    if (!c) { Tcl_SetResult(interp, "invalid id", TCL_STATIC); return TCL_ERROR; }
+
+    const char *text = Tcl_GetString(objv[3]);
+    const char *fontspec = "Sans 12";
+
+    /* Parse optional -font */
+    for (int i = 4; i < objc - 1; i += 2) {
+        const char *opt = Tcl_GetString(objv[i]);
+        if (!strcmp(opt, "-font")) {
+            fontspec = Tcl_GetString(objv[i+1]);
+        }
+    }
+
+    char family[64] = "Sans";
+    double sz = 12.0;
+    cairo_font_weight_t wt = CAIRO_FONT_WEIGHT_NORMAL;
+    cairo_font_slant_t  sl = CAIRO_FONT_SLANT_NORMAL;
+    parse_font(fontspec, family, sizeof(family), &wt, &sl, &sz);
+
+    cairo_save(c->cr);
+    cairo_select_font_face(c->cr, family, sl, wt);
+    cairo_set_font_size(c->cr, sz);
+
+    cairo_text_extents_t ext;
+    cairo_font_extents_t fext;
+    cairo_text_extents(c->cr, text, &ext);
+    cairo_font_extents(c->cr, &fext);
+    cairo_restore(c->cr);
+
+    Tcl_Obj *d = Tcl_NewDictObj();
+    Tcl_DictObjPut(interp, d, Tcl_NewStringObj("width",    -1), Tcl_NewDoubleObj(ext.width));
+    Tcl_DictObjPut(interp, d, Tcl_NewStringObj("height",   -1), Tcl_NewDoubleObj(ext.height));
+    Tcl_DictObjPut(interp, d, Tcl_NewStringObj("x_bearing",-1), Tcl_NewDoubleObj(ext.x_bearing));
+    Tcl_DictObjPut(interp, d, Tcl_NewStringObj("y_bearing",-1), Tcl_NewDoubleObj(ext.y_bearing));
+    Tcl_DictObjPut(interp, d, Tcl_NewStringObj("x_advance",-1), Tcl_NewDoubleObj(ext.x_advance));
+    Tcl_DictObjPut(interp, d, Tcl_NewStringObj("ascent",   -1), Tcl_NewDoubleObj(fext.ascent));
+    Tcl_DictObjPut(interp, d, Tcl_NewStringObj("descent",  -1), Tcl_NewDoubleObj(fext.descent));
+    Tcl_SetObjResult(interp, d);
+    return TCL_OK;
+}
+
 /* Sets font rendering options. Called before text commands.          */
 /* Without args: returns current settings as dict.                    */
 /* ================================================================== */
@@ -2788,6 +2852,7 @@ static int TkmCairoCmd(ClientData cd, Tcl_Interp *interp,
     else if (!strcmp(sub,"paint"))            return CairoPaintCmd(cd,interp,objc,objv);
     else if (!strcmp(sub,"set_source"))       return CairoSetSourceCmd(cd,interp,objc,objv);
     else if (!strcmp(sub,"font_options"))     return CairoFontOptionsCmd(cd,interp,objc,objv);
+    else if (!strcmp(sub,"text_extents"))     return CairoTextExtentsCmd(cd,interp,objc,objv);
     else if (!strcmp(sub,"path_get"))         return CairoPathGetCmd(cd,interp,objc,objv);
     else if (!strcmp(sub,"surface_copy"))     return CairoSurfaceCopyCmd(cd,interp,objc,objv);
     /* Low-level path commands (Cairo samples API) */
@@ -2843,6 +2908,58 @@ static void TclmcairoInterpCleanup(ClientData cd, Tcl_Interp *interp)
     }
 }
 
+/* ================================================================== */
+/* Windows: Pre-load Cairo dependencies from same directory as DLL    */
+/* Uses GetModuleHandleEx to find our own DLL path at runtime.        */
+/* No PATH modification, no admin rights, works on Windows 10+.       */
+/* ================================================================== */
+#ifdef _WIN32
+#include <windows.h>
+static void preload_cairo_deps(void) {
+    HMODULE hSelf;
+    char dll_dir[MAX_PATH];
+    char dll_path[MAX_PATH];
+    int dirlen;
+
+    /* Get handle to THIS DLL using a function address inside it */
+    if (!GetModuleHandleEx(
+            GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+            GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+            (LPCSTR)&preload_cairo_deps,
+            &hSelf)) return;
+
+    /* Get full path to this DLL */
+    if (GetModuleFileNameA(hSelf, dll_dir, sizeof(dll_dir)) == 0) return;
+
+    /* Strip filename — keep only directory with trailing backslash */
+    dirlen = (int)strlen(dll_dir);
+    while (dirlen > 0 &&
+           dll_dir[dirlen-1] != '\\' &&
+           dll_dir[dirlen-1] != '/') {
+        dirlen--;
+    }
+    dll_dir[dirlen] = '\0';
+
+    /* Load Cairo dependencies in dependency order.
+     * Failures are silently ignored (optional DLLs, static builds). */
+    const char *deps[] = {
+        "zlib1.dll",
+        "libpng16-16.dll",
+        "libbrotlicommon.dll",
+        "libbrotlidec.dll",
+        "libfreetype-6.dll",
+        "libfontconfig-1.dll",
+        "libpixman-1-0.dll",
+        "libcairo-2.dll",
+        NULL
+    };
+    for (int i = 0; deps[i]; i++) {
+        snprintf(dll_path, sizeof(dll_path), "%s%s", dll_dir, deps[i]);
+        LoadLibraryA(dll_path);  /* ignore return — may not exist */
+    }
+}
+#endif /* _WIN32 */
+
 int Tclmcairo_Init(Tcl_Interp *interp)
 {
 #ifdef USE_TCL_STUBS
@@ -2852,9 +2969,13 @@ int Tclmcairo_Init(Tcl_Interp *interp)
     if (Tcl_InitStubs(interp, "8.6", 0) == NULL) return TCL_ERROR;
 #endif
 #endif
+    /* Windows: pre-load Cairo DLLs from our own directory */
+#ifdef _WIN32
+    preload_cairo_deps();
+#endif
     Tcl_CreateObjCommand(interp, "tclmcairo", TkmCairoCmd, NULL, NULL);
     /* Register cleanup callback — frees all contexts on interp deletion */
     Tcl_CallWhenDeleted(interp, TclmcairoInterpCleanup, NULL);
-    Tcl_PkgProvide(interp, "tclmcairo", "0.3.2");
+    Tcl_PkgProvide(interp, "tclmcairo", "0.3.3");
     return TCL_OK;
 }

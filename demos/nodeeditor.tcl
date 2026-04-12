@@ -72,6 +72,16 @@ namespace eval ::demo {
     variable resizeNode   ""    ;# node being resized
     variable resizeStart  {}    ;# {mx my origW origH}
     variable selectedEdge ""    ;# "from->to" tag of selected edge
+    variable roomCounter  0
+    variable selectedRoom ""
+    variable roomDrag     {}    ;# {roomId lastX lastY}
+    variable roomResize   {}    ;# {roomId lastX lastY origW origH}
+    variable exportRooms  1     ;# include rooms in export
+    variable minimapW     180   ;# minimap width in pixels
+    variable minimapH     120   ;# minimap height in pixels
+    variable minimapPhoto ""    ;# Tk photo image for minimap
+    variable minimapVisible 1   ;# show/hide minimap
+    variable minimapPending 0   ;# debounce flag
 }
 
 # ============================================================
@@ -144,11 +154,12 @@ proc ::demo::addNode {x y title subtitle color {type generic}} {
         workstation -
         accesspoint -
         wifi        -
-        phone       { set w 120; set h 110 }
+        phone       { set w 110; set h 110 }
         server      -
-        firewall    -
+        firewall    { set w 120; set h 110 }
         printer     -
         scanner     { set w 130; set h 100 }
+        cloud       { set w 150; set h 100 }
         fiber       { set w 150; set h 90  }
         building    { set w 130; set h 120 }
         table       { set w 160; set h 120 }
@@ -160,9 +171,20 @@ proc ::demo::addNode {x y title subtitle color {type generic}} {
     return $id
 }
 
-proc ::demo::addEdge {fromPort toPort} {
+proc ::demo::addEdge {fromPort toPort {linktype ethernet}} {
     variable data
-    dict lappend data edges [dict create from $fromPort to $toPort]
+    dict lappend data edges [dict create from $fromPort to $toPort linktype $linktype]
+}
+
+# Link type visual properties: {color dash width label}
+proc ::demo::linkStyle {linktype} {
+    switch $linktype {
+        ethernet    { return [list "#3465a4" {}        2   "ETH"] }
+        wlan        { return [list "#22aa55" {8 4 2 4} 2   "WLAN"] }
+        fiber       { return [list "#cc6600" {}        3   "FO"] }
+        serial      { return [list "#888888" {4 4}     1.5 "SER"] }
+        default     { return [list "#3465a4" {}        2   ""] }
+    }
 }
 
 proc ::demo::getNode {id} {
@@ -190,6 +212,233 @@ proc ::demo::allEdges {} {
 # ============================================================
 # Port coordinates  (port = "nodeId:side")
 # ============================================================
+# ============================================================
+# Room management
+# ============================================================
+proc ::demo::newRoomId {} {
+    variable roomCounter
+    incr roomCounter
+    return "room$roomCounter"
+}
+
+proc ::demo::addRoom {x y w h label {color "#e8f4e8"}} {
+    variable data
+    variable roomCounter
+    set id [newRoomId]
+    dict set data rooms $id [dict create         id $id x $x y $y w $w h $h         label $label color $color]
+    return $id
+}
+
+proc ::demo::allRooms {} {
+    variable data
+    if {![dict exists $data rooms]} { return {} }
+    return [dict get $data rooms]
+}
+
+proc ::demo::getRoom {id} {
+    variable data
+    return [dict get $data rooms $id]
+}
+
+proc ::demo::setRoomField {id field value} {
+    variable data
+    dict set data rooms $id $field $value
+}
+
+proc ::demo::deleteRoom {id} {
+    variable data
+    if {[dict exists $data rooms $id]} {
+        dict unset data rooms $id
+    }
+}
+
+proc ::demo::drawRooms {} {
+    variable canvas
+    variable zoom
+    variable selectedRoom
+
+    $canvas delete room
+
+    dict for {id room} [allRooms] {
+        set x  [expr {[dict get $room x] * $zoom}]
+        set y  [expr {[dict get $room y] * $zoom}]
+        set w  [expr {[dict get $room w] * $zoom}]
+        set h  [expr {[dict get $room h] * $zoom}]
+        set lbl [dict get $room label]
+        set col [dict get $room color]
+        set rtag "room:$id"
+
+        # Parse hex color -> fill with alpha
+        set fc [winfo rgb . $col]
+        set r [expr {[lindex $fc 0] / 65535.0}]
+        set g [expr {[lindex $fc 1] / 65535.0}]
+        set b [expr {[lindex $fc 2] / 65535.0}]
+
+        # Background fill
+        set sel [expr {$selectedRoom eq $id}]
+        set outline [expr {$sel ? "#2266cc" : "#888888"}]
+        set lw      [expr {$sel ? 3 : 1.5}]
+        $canvas create rectangle $x $y [expr {$x+$w}] [expr {$y+$h}]             -fill $col -outline $outline -width $lw             -dash [expr {$sel ? {6 3} : {}}]             -tags [list room $rtag roomfill]
+
+        # Resize handle (bottom-right)
+        set hx [expr {$x + $w - 8}]
+        set hy [expr {$y + $h - 8}]
+        $canvas create rectangle $hx $hy [expr {$hx+8}] [expr {$hy+8}]             -fill "#888888" -outline ""             -tags [list room $rtag roomhandle]
+
+        # Label bar at top
+        set barh [expr {max(22, 22*$zoom)}]
+        $canvas create rectangle $x $y [expr {$x+$w}] [expr {$y+$barh}]             -fill $outline -outline ""             -stipple ""             -tags [list room $rtag roombar]
+
+        set fs [expr {max(9, int(12*$zoom))}]
+        $canvas create text [expr {$x + $w/2.0}] [expr {$y + $barh/2.0}]             -text $lbl -font "Sans $fs bold"             -fill white -anchor center             -tags [list room $rtag roomlabel]
+
+        # Click binding for room selection
+        foreach t [list roomfill roombar roomlabel] {
+            $canvas bind $rtag&&$t <ButtonPress-1>                 [list ::demo::roomClickB1 $id %x %y]
+            $canvas bind $rtag&&roomhandle <ButtonPress-1>                 [list ::demo::roomResizeStart $id %x %y]
+        }
+    }
+    # Rooms always below nodes
+    $canvas lower room
+    $canvas lower grid
+}
+
+proc ::demo::roomClickB1 {id x y} {
+    variable selectedRoom
+    variable roomDrag
+    set cx [$::demo::canvas canvasx $x]
+    set cy [$::demo::canvas canvasy $y]
+    set selectedRoom $id
+    set roomDrag [list $id $cx $cy]
+    drawAll
+}
+
+proc ::demo::roomResizeStart {id x y} {
+    variable roomResize
+    variable selectedRoom
+    set cx [$::demo::canvas canvasx $x]
+    set cy [$::demo::canvas canvasy $y]
+    set room [getRoom $id]
+    set selectedRoom $id
+    set roomResize [list $id $cx $cy         [dict get $room w] [dict get $room h]]
+}
+
+proc ::demo::roomDragMotion {x y} {
+    variable roomDrag
+    if {$roomDrag eq {}} return
+    set id   [lindex $roomDrag 0]
+    set lx   [lindex $roomDrag 1]
+    set ly   [lindex $roomDrag 2]
+    set cx [$::demo::canvas canvasx $x]
+    set cy [$::demo::canvas canvasy $y]
+    # Canvas-delta directly — same as moveNode, no zoom division
+    set dx [expr {$cx - $lx}]
+    set dy [expr {$cy - $ly}]
+    set room [getRoom $id]
+    setRoomField $id x [expr {[dict get $room x] + $dx}]
+    setRoomField $id y [expr {[dict get $room y] + $dy}]
+    set roomDrag [list $id $cx $cy]
+    drawAll
+}
+
+proc ::demo::roomResizeMotion {x y} {
+    variable roomResize
+    variable zoom
+    if {$roomResize eq {}} return
+    set id   [lindex $roomResize 0]
+    set ox   [lindex $roomResize 1]
+    set oy   [lindex $roomResize 2]
+    set ow   [lindex $roomResize 3]
+    set oh   [lindex $roomResize 4]
+    set cx [$::demo::canvas canvasx $x]
+    set cy [$::demo::canvas canvasy $y]
+    set nw [expr {max(80, $ow + ($cx - $ox))}]
+    set nh [expr {max(60, $oh + ($cy - $oy))}]
+    setRoomField $id w $nw
+    setRoomField $id h $nh
+    drawAll
+}
+
+proc ::demo::roomReleaseB1 {} {
+    variable roomDrag
+    variable roomResize
+    set roomDrag {}
+    set roomResize {}
+}
+
+proc ::demo::editRoom {id} {
+    variable selectedRoom
+    set room [getRoom $id]
+    set dlg .editroom
+    catch {destroy $dlg}
+    toplevel $dlg
+    wm title $dlg "Edit Room"
+    wm resizable $dlg 0 0
+
+    ttk::frame $dlg.f -padding 10
+    pack $dlg.f -fill both -expand 1
+
+    ttk::label $dlg.f.ll  -text "Label:" -anchor w
+    ttk::entry $dlg.f.el  -width 24
+    $dlg.f.el insert 0 [dict get $room label]
+
+    ttk::label $dlg.f.lc  -text "Color:" -anchor w
+    ttk::entry $dlg.f.ec  -width 12
+    $dlg.f.ec insert 0 [dict get $room color]
+    ttk::button $dlg.f.bc -text "Pick…" -command [list apply {{e} {
+        set c [tk_chooseColor -initialcolor [$e get]]
+        if {$c ne ""} { $e delete 0 end; $e insert 0 $c }
+    }} $dlg.f.ec]
+
+    set row 0
+    foreach {lw ew} {ll el  lc ec} {
+        grid $dlg.f.$lw -row $row -column 0 -sticky w -pady 2
+        grid $dlg.f.$ew -row $row -column 1 -sticky ew -pady 2
+        incr row
+    }
+    grid $dlg.f.bc -row 1 -column 2 -padx 4
+
+    ttk::frame $dlg.f.btn
+    grid $dlg.f.btn -row $row -column 0 -columnspan 3 -pady 8
+
+    ttk::button $dlg.f.btn.ok -text "OK" -default active         -command [list apply {{dlg id el ec} {
+            pushUndo
+            setRoomField $id label [$el get]
+            setRoomField $id color [$ec get]
+            drawAll
+            destroy $dlg
+        }} $dlg $id $dlg.f.el $dlg.f.ec]
+    ttk::button $dlg.f.btn.ca -text "Cancel" -command [list destroy $dlg]
+    pack $dlg.f.btn.ok $dlg.f.btn.ca -side left -padx 4
+    bind $dlg <Return> [list $dlg.f.btn.ok invoke]
+    bind $dlg <Escape> [list destroy $dlg]
+    focus $dlg.f.el
+    wm transient $dlg .
+    wm geometry $dlg +[expr {[winfo rootx .]+120}]+[expr {[winfo rooty .]+120}]
+    tkwait window $dlg
+}
+
+proc ::demo::addRandomRoom {} {
+    variable data
+    pushUndo
+    set colors {"#e8f4e8" "#e8eef8" "#f8f0e8" "#f8e8f0" "#f0f8e8"}
+    set col [lindex $colors [expr {int(rand()*5)}]]
+    set x [expr {int(rand()*400 + 50)}]
+    set y [expr {int(rand()*300 + 50)}]
+    set id [addRoom $x $y 250 200 "Room [incr ::demo::roomCounter]" $col]
+    drawAll
+    set ::demo::statusVar "Added room $id"
+}
+
+proc ::demo::deleteSelectedRoom {} {
+    variable selectedRoom
+    if {$selectedRoom eq ""} return
+    pushUndo
+    deleteRoom $selectedRoom
+    set selectedRoom ""
+    drawAll
+}
+
 proc ::demo::portCoords {port} {
     lassign [split $port :] nodeId side
     set node [getNode $nodeId]
@@ -302,6 +551,16 @@ proc ::demo::loadFromFile {args} {
 # ============================================================
 # UI
 # ============================================================
+proc ::demo::_xscroll {first last} {
+    .work.xs set $first $last
+    after idle {::demo::scheduleMinimap}
+}
+
+proc ::demo::_yscroll {first last} {
+    .work.ys set $first $last
+    after idle {::demo::scheduleMinimap}
+}
+
 proc ::demo::buildUI {} {
     variable canvas
 
@@ -315,8 +574,19 @@ proc ::demo::buildUI {} {
     pack .toolbar -in .main -side top -fill x
 
     ttk::label  .toolbar.ltype -text "Type:"
-    ttk::combobox .toolbar.type -width 12         -values {generic router switch server firewall database workstation                  printer scanner accesspoint phone wifi fiber building table}         -state readonly
+    ttk::combobox .toolbar.type -width 12 \
+        -values {generic router switch server firewall database workstation \
+                 printer scanner accesspoint phone wifi fiber building table cloud} \
+        -state readonly
     .toolbar.type set generic
+
+    ttk::separator .toolbar.sl -orient vertical
+    ttk::label  .toolbar.llinktype -text "Link:"
+    ttk::combobox .toolbar.linktype -width 10 \
+        -values {ethernet wlan fiber serial} \
+        -state readonly
+    .toolbar.linktype set ethernet
+
     ttk::button .toolbar.add   -text "Add Node"   -command {::demo::addRandomNode}
     ttk::button .toolbar.fit   -text "Fit"         -command {::demo::fitToContent}
     ttk::button .toolbar.grid  -text "Grid"        -command {::demo::toggleGrid}
@@ -336,13 +606,18 @@ proc ::demo::buildUI {} {
 
     ttk::separator .toolbar.s3 -orient vertical
 
+    ttk::separator .toolbar.s4 -orient vertical
+    ttk::button .toolbar.addroom -text "Add Room"  -command {::demo::addRandomRoom}
+    ttk::checkbutton .toolbar.exprooms -text "Rooms in Export" \
+        -variable ::demo::exportRooms
+    ttk::separator .toolbar.s5 -orient vertical
     ttk::button .toolbar.svg   -text "Export SVG"  -command {::demo::exportFile svg}
     ttk::button .toolbar.pdf   -text "Export PDF"  -command {::demo::exportFile pdf}
     ttk::button .toolbar.crop  -text "Export Region…" -command {::demo::startExportRegion}
 
     ttk::button .toolbar.snap  -text "Snap ✓"    -command {::demo::toggleSnap}
 
-    foreach w {ltype type add fit grid snap reset s1 undo redo s2 save load s3 svg pdf crop} {
+    foreach w {ltype type sl llinktype linktype add s4 addroom exprooms s5 fit grid snap reset s1 undo redo s2 save load s3 svg pdf crop} {
         pack .toolbar.$w -side left -padx 2 -pady 4
     }
 
@@ -355,8 +630,8 @@ proc ::demo::buildUI {} {
 
     canvas .work.c \
         -background white \
-        -xscrollcommand {.work.xs set} \
-        -yscrollcommand {.work.ys set} \
+        -xscrollcommand {::demo::_xscroll} \
+        -yscrollcommand {::demo::_yscroll} \
         -scrollregion {-2000 -2000 4000 4000} \
         -highlightthickness 0 \
         -cursor crosshair
@@ -375,12 +650,31 @@ proc ::demo::buildUI {} {
     ttk::label .status -textvariable ::demo::statusVar -anchor w
     pack .status -in .main -side bottom -fill x
 
+    # Mini-Map (tclmcairo off-screen rendering -> Tk photo)
+    frame .minimap -relief solid -bd 1 -bg "#222222"
+    ttk::label .minimap.title -text "Mini-Map  (Cairo)"         -background "#222222" -foreground "#aaaaaa"         -font "TkSmallCaptionFont" -anchor w -padding {4 2}
+    label .minimap.img -background "#222222" -cursor hand2
+    ttk::checkbutton .minimap.toggle -text "Show"         -variable ::demo::minimapVisible         -command {::demo::updateMinimap}         -style Toolbutton
+    pack .minimap.title -side top -fill x
+    pack .minimap.img   -side top -padx 2 -pady 2
+    # Place minimap over canvas, bottom-right
+    place .minimap -in .work.c -anchor se         -relx 1.0 -rely 1.0 -x -10 -y -10
+
     # Popup
     menu .popup -tearoff 0
     .popup add command -label "Add Node Here"        -command {::demo::popupAddNode}
     .popup add command -label "Delete Selected"      -command {::demo::deleteSelected}
     .popup add separator
     .popup add command -label "Bring To Front"       -command {::demo::raiseSelectedNode}
+    .popup add separator
+    .popup add command -label "Edit Room"            -command {::demo::editSelectedRoom}
+    .popup add command -label "Delete Room"          -command {::demo::deleteSelectedRoom}
+    .popup add separator
+    .popup add cascade -label "Link Type" -menu .popup.linktype
+    menu .popup.linktype -tearoff 0
+    foreach lt {ethernet wlan fiber serial} {
+        .popup.linktype add command -label [string totitle $lt]             -command [list ::demo::setSelectedEdgeLinktype $lt]
+    }
 
     bindCanvas
 }
@@ -526,6 +820,41 @@ proc ::demo::deleteSelectedEdge {} {
 # ============================================================
 # Snap-to-grid
 # ============================================================
+
+proc ::demo::setSelectedEdgeLinktype {ltype} {
+    variable data
+    variable selectedEdge
+    if {$selectedEdge eq ""} return
+    # selectedEdge tag format: "edge:from_side->to_side"
+    # Extract the part after "edge:"
+    set edgetag [string range $selectedEdge 5 end]
+    # Split on "->" as string (not character class)
+    set arrowpos [string first "->" $edgetag]
+    if {$arrowpos < 0} return
+    set fromtag [string range $edgetag 0 [expr {$arrowpos - 1}]]
+    set totag   [string range $edgetag [expr {$arrowpos + 2}] end]
+    # Tags use _ instead of : (canvas tag restriction)
+    set from [string map {_ :} $fromtag]
+    set to   [string map {_ :} $totag]
+    pushUndo
+    set newEdges {}
+    foreach edge [allEdges] {
+        if {[dict get $edge from] eq $from && [dict get $edge to] eq $to} {
+            dict set edge linktype $ltype
+        }
+        lappend newEdges $edge
+    }
+    dict set data edges $newEdges
+    drawAll
+    set ::demo::statusVar "Link type set to $ltype"
+}
+
+proc ::demo::editSelectedRoom {} {
+    variable selectedRoom
+    if {$selectedRoom eq ""} return
+    editRoom $selectedRoom
+}
+
 proc ::demo::snapCoord {v} {
     variable snapGrid
     variable gridSize
@@ -578,6 +907,9 @@ proc ::demo::bindCanvas {} {
 
     bind $canvas <ButtonPress-2>   {::demo::startPan %x %y}
     bind $canvas <B2-Motion>       {::demo::doPan    %x %y}
+
+    # Update minimap on pan
+    bind $canvas <B2-ButtonRelease> {after idle {::demo::scheduleMinimap}}
 
     bind $canvas <ButtonPress-3>   {::demo::showPopup %X %Y %x %y}
 
@@ -709,6 +1041,19 @@ proc ::demo::onDrag {sx sy} {
     variable dragInfo
     variable resizeNode
     variable resizeStart
+    variable roomDrag
+    variable roomResize
+
+    # Room resize
+    if {$roomResize ne {}} {
+        roomResizeMotion $sx $sy
+        return
+    }
+    # Room drag
+    if {$roomDrag ne {}} {
+        roomDragMotion $sx $sy
+        return
+    }
 
     if {$resizeNode ne ""} {
         set x [$canvas canvasx $sx]
@@ -748,6 +1093,13 @@ proc ::demo::onRelease {sx sy} {
     variable connectStart
     variable connectLine
     variable resizeNode
+    variable roomDrag
+    variable roomResize
+
+    if {$roomDrag ne {} || $roomResize ne {}} {
+        roomReleaseB1
+        return
+    }
 
     if {$resizeNode ne ""} {
         snapNode $resizeNode
@@ -763,8 +1115,10 @@ proc ::demo::onRelease {sx sy} {
             # Convert canvas tag format "port:nodeId:side" to "nodeId:side"
             set p1 [join [lrange [split $connectStart :] 1 end] :]
             set p2 [join [lrange [split $port2        :] 1 end] :]
-            addEdge $p1 $p2
-            set ::demo::statusVar "Connected $p1 → $p2"
+            set ltype "ethernet"
+            catch { set ltype [.toolbar.linktype get] }
+            addEdge $p1 $p2 $ltype
+            set ::demo::statusVar "Connected $p1 → $p2 ($ltype)"
         } else {
             set ::demo::statusVar "Connection cancelled"
         }
@@ -809,14 +1163,16 @@ proc ::demo::drawAll {} {
     # Keep shape image cache alive — images persist until zoom changes
     variable shapeImages
     drawGrid
+    drawRooms
     drawEdges
     foreach id [allNodeIds] { drawNode $id }
-    # Z-Order: grid and edgehit always at bottom, ports always on top
-    # Individual node items are drawn in correct order inside drawNode
+    # Z-Order: rooms below grid, nodes on top
+    $canvas lower room
     $canvas lower grid
-    $canvas lower edgehit   ;# hit areas below everything
+    $canvas lower edgehit
     $canvas raise port
     updateScrollregion
+    after idle {::demo::scheduleMinimap}
 }
 
 proc ::demo::drawGrid {} {
@@ -970,9 +1326,11 @@ proc ::demo::drawNode {id} {
 
 proc ::demo::drawEdges {} {
     variable canvas
+    variable selectedEdge
     foreach edge [allEdges] {
         set from [dict get $edge from]
         set to   [dict get $edge to]
+        set ltype [expr {[dict exists $edge linktype] ? [dict get $edge linktype] : "ethernet"}]
 
         if {[catch {portCoords $from} p1]} continue
         if {[catch {portCoords $to}   p2]} continue
@@ -981,18 +1339,34 @@ proc ::demo::drawEdges {} {
         lassign $p2 x2 y2
 
         set coords [routeEdge $x1 $y1 $x2 $y2 $from $to]
-
         set etag "edge:[string map {: _} $from]->[string map {: _} $to]"
-        # Invisible wide line for easy clicking (drawn first, under visible line)
+
+        lassign [linkStyle $ltype] lcolor ldash lwidth llabel
+
+        # Invisible wide hit area
         $canvas create line {*}$coords \
             -width 12 -fill "#ffffff" -stipple gray12 \
             -tags [list edge edgehit $etag]
-        # Visible line on top
+
+        # Visible line
+        set dashopt [expr {$ldash ne {} ? [list -dash $ldash] : {}}]
+        set selcolor [expr {$selectedEdge eq $etag ? "#ff6600" : $lcolor}]
+        set selwidth [expr {$selectedEdge eq $etag ? $lwidth+1 : $lwidth}]
         $canvas create line {*}$coords \
-            -width 2 -fill "#3465a4" \
-            -arrow last \
-            -joinstyle miter \
+            -width $selwidth -fill $selcolor \
+            {*}$dashopt \
+            -arrow last -joinstyle miter \
             -tags [list edge edgevis $etag]
+
+        # Link type label at midpoint
+        if {$llabel ne ""} {
+            set n [llength $coords]
+            set mx [expr {([lindex $coords 0] + [lindex $coords end-1]) / 2.0}]
+            set my [expr {([lindex $coords 1] + [lindex $coords end])   / 2.0}]
+            $canvas create text $mx [expr {$my - 8}] \
+                -text $llabel -font {TkSmallCaptionFont 7} \
+                -fill $lcolor -tags [list edge edgelabel $etag]
+        }
     }
 }
 
@@ -1046,10 +1420,13 @@ proc ::demo::deleteSelectedNode {} {
 proc ::demo::deleteSelected {} {
     variable selectedNode
     variable selectedEdge
+    variable selectedRoom
     if {$selectedEdge ne ""} {
         deleteSelectedEdge
     } elseif {$selectedNode ne ""} {
         deleteSelectedNode
+    } elseif {$selectedRoom ne ""} {
+        deleteSelectedRoom
     }
 }
 
@@ -1190,27 +1567,35 @@ proc ::demo::exportRegionRaster {canvas x1 y1 w h file} {
 proc ::demo::exportCleanup {} {
     variable canvas
     variable connectLine
+    variable exportRooms
     $canvas delete connect_rubber
     $canvas delete export_rect
     if {$connectLine ne ""} {
         $canvas delete $connectLine
         set connectLine ""
     }
-    # Delete (not hide) items that must not appear in export
-    # hide/state has no effect in Cairo for stipple lines
     $canvas itemconfigure grid        -state hidden
     $canvas itemconfigure resizehandle -state hidden
-    $canvas delete edgehit            ;# delete entirely — stipple renders as solid in Cairo
+    $canvas delete edgehit
+    # Hide room handles and selection markers for export
+    $canvas itemconfigure roomhandle  -state hidden
+    if {!$exportRooms} {
+        $canvas itemconfigure room -state hidden
+    }
 }
 
 proc ::demo::exportRestore {} {
     variable canvas
     variable showGrid
+    variable exportRooms
     if {$showGrid} {
         $canvas itemconfigure grid -state normal
     }
     $canvas itemconfigure resizehandle -state normal
-    # Restore edgehit lines by redrawing edges
+    $canvas itemconfigure roomhandle   -state normal
+    if {!$exportRooms} {
+        $canvas itemconfigure room -state normal
+    }
     drawEdges
     $canvas lower edgehit
 }
@@ -1225,7 +1610,12 @@ proc ::demo::exportFile {ext} {
     if {$file eq ""} return
 
     # Compute bbox BEFORE exportCleanup (cleanup removes/hides items)
-    set bbox [$canvas bbox node]
+    variable exportRooms
+    if {$exportRooms} {
+        set bbox [$canvas bbox node room]
+    } else {
+        set bbox [$canvas bbox node]
+    }
     if {$bbox eq ""} { set bbox [$canvas bbox all] }
     set vp ""
     if {$bbox ne ""} {
@@ -1317,6 +1707,220 @@ proc ::demo::mouseWheel {delta x y} {
     if {$delta > 0} { zoomAt 1.1 $x $y } else { zoomAt 0.9 $x $y }
 }
 
+# ============================================================
+# Mini-Map — rendered with tclmcairo (off-screen Cairo → topng → Tk photo)
+# ============================================================
+proc ::demo::scheduleMinimap {} {
+    variable minimapPending
+    if {$minimapPending} return
+    set minimapPending 1
+    after 50 {set ::demo::minimapPending 0; catch {::demo::updateMinimap}}
+}
+
+proc ::demo::updateMinimap {} {
+    variable canvas
+    variable minimapW
+    variable minimapH
+    variable minimapPhoto
+    variable minimapVisible
+    variable zoom
+
+    if {!$minimapVisible} {
+        catch { .minimap.img configure -image {} }
+        return
+    }
+
+    # --- Compute world bounding box of all content ---
+    set allids [$canvas find all]
+    if {[llength $allids] == 0} return
+
+    # Use scrollregion world bounds
+    set wx1 -2000; set wy1 -2000
+    set wx2  4000; set wy2  4000
+
+    # Try to tighten bbox to actual content
+    set bbox [$canvas bbox node room]
+    if {$bbox ne ""} {
+        lassign $bbox bx1 by1 bx2 by2
+        # Convert from canvas (scaled) to world
+        set pad 60
+        set wx1 [expr {$bx1/$zoom - $pad}]
+        set wy1 [expr {$by1/$zoom - $pad}]
+        set wx2 [expr {$bx2/$zoom + $pad}]
+        set wy2 [expr {$by2/$zoom + $pad}]
+    }
+
+    set ww [expr {$wx2 - $wx1}]
+    set wh [expr {$wy2 - $wy1}]
+    if {$ww <= 0 || $wh <= 0} return
+
+    # Scale factor: world → minimap pixels
+    set sx [expr {$minimapW / double($ww)}]
+    set sy [expr {$minimapH / double($wh)}]
+    set sc [expr {min($sx, $sy) * 0.95}]
+
+    # Actual minimap pixel size
+    set mw [expr {int($ww * $sc) + 4}]
+    set mh [expr {int($wh * $sc) + 4}]
+
+    # --- Cairo off-screen rendering ---
+    set ctx ""
+    if {[catch {tclmcairo::new $mw $mh} ctx]} return
+
+    # Background
+    $ctx clear 0.13 0.13 0.15 1
+
+    # Helper: world coord → minimap pixel
+    proc _mm {wx wy} [subst {
+        set px [expr {(\$wx - ($wx1)) * $sc + 2}]
+        set py [expr {(\$wy - ($wy1)) * $sc + 2}]
+        list \$px \$py
+    }]
+
+    # --- Draw rooms ---
+    dict for {rid room} [allRooms] {
+        set col [dict get $room color]
+        set rx  [dict get $room x]
+        set ry  [dict get $room y]
+        set rw  [dict get $room w]
+        set rh  [dict get $room h]
+
+        # Parse hex → cairo color
+        set fc [winfo rgb . $col]
+        set cr [expr {[lindex $fc 0]/65535.0}]
+        set cg [expr {[lindex $fc 1]/65535.0}]
+        set cb [expr {[lindex $fc 2]/65535.0}]
+
+        lassign [_mm $rx $ry] px py
+        set pw [expr {$rw * $sc}]
+        set ph [expr {$rh * $sc}]
+
+        $ctx rect $px $py $pw $ph             -fill [list $cr $cg $cb 0.5]             -stroke [list [expr {$cr*0.6}] [expr {$cg*0.6}] [expr {$cb*0.6}] 0.8]             -width 0.8 -radius 2
+
+        # Room label (tiny)
+        set fs [expr {max(6, int(8*$sc*3))}]
+        if {$fs >= 6} {
+            $ctx text [expr {$px + $pw/2.0}] [expr {$py + 8}]                 [dict get $room label]                 -font "Sans $fs" -color {0.9 0.9 0.9 0.9} -anchor center
+        }
+    }
+
+    # --- Draw edges ---
+    foreach edge [allEdges] {
+        set from [dict get $edge from]
+        set to   [dict get $edge to]
+        set ltype [expr {[dict exists $edge linktype] ? [dict get $edge linktype] : "ethernet"}]
+        if {[catch {portCoords $from} p1]} continue
+        if {[catch {portCoords $to}   p2]} continue
+        lassign $p1 ex1 ey1
+        lassign $p2 ex2 ey2
+        # Convert from canvas pixels to world
+        set ex1 [expr {$ex1 / $zoom}]
+        set ey1 [expr {$ey1 / $zoom}]
+        set ex2 [expr {$ex2 / $zoom}]
+        set ey2 [expr {$ey2 / $zoom}]
+        lassign [_mm $ex1 $ey1] lx1 ly1
+        lassign [_mm $ex2 $ey2] lx2 ly2
+
+        lassign [linkStyle $ltype] lcol ldash
+        # Parse hex color
+        set fc [winfo rgb . $lcol]
+        set lr [expr {[lindex $fc 0]/65535.0}]
+        set lg [expr {[lindex $fc 1]/65535.0}]
+        set lb [expr {[lindex $fc 2]/65535.0}]
+
+        $ctx line $lx1 $ly1 $lx2 $ly2             -color [list $lr $lg $lb 0.85] -width 1.2
+    }
+
+    # --- Draw nodes ---
+    dict for {nid node} [dict get [set ::demo::data] nodes] {
+        set nx [dict get $node x]
+        set ny [dict get $node y]
+        set nw [dict get $node w]
+        set nh [dict get $node h]
+        set ncol [dict get $node color]
+        set ntype [expr {[dict exists $node type] ? [dict get $node type] : "generic"}]
+
+        lassign [_mm $nx $ny] px py
+        set pw [expr {$nw * $sc}]
+        set ph [expr {$nh * $sc}]
+
+        # Node color
+        set fc [winfo rgb . $ncol]
+        set nr [expr {[lindex $fc 0]/65535.0}]
+        set ng [expr {[lindex $fc 1]/65535.0}]
+        set nb [expr {[lindex $fc 2]/65535.0}]
+
+        # Type accent color
+        lassign [typeColor $ntype] tr tg tb
+
+        # Node box with gradient
+        set pw2 [expr {max(8, $pw)}]
+        set ph2 [expr {max(6, $ph)}]
+        $ctx gradient_linear nbg $px $py $px [expr {$py+$ph2}]             [list [list 0 $nr $ng $nb 1]                   [list 1 [expr {$nr*0.8}] [expr {$ng*0.8}] [expr {$nb*0.8}] 1]]
+        $ctx rect $px $py $pw2 $ph2             -fillname nbg             -stroke [list $tr $tg $tb 0.9] -width 0.8 -radius 2
+
+        # Type dot
+        set dotx [expr {$px + 4}]
+        set doty [expr {$py + $ph2/2.0}]
+        $ctx circle $dotx $doty 2.5 -fill [list $tr $tg $tb 1.0]
+    }
+
+    # --- Viewport indicator ---
+    # Current visible region in canvas coords → world
+    lassign [$canvas xview] vx1f vx2f
+    lassign [$canvas yview] vy1f vy2f
+    lassign [$canvas cget -scrollregion] srx1 sry1 srx2 sry2
+    set srw [expr {$srx2 - $srx1}]
+    set srh [expr {$sry2 - $sry1}]
+    set vwx1 [expr {$srx1 + $vx1f * $srw}]
+    set vwy1 [expr {$sry1 + $vy1f * $srh}]
+    set vwx2 [expr {$srx1 + $vx2f * $srw}]
+    set vwy2 [expr {$sry1 + $vy2f * $srh}]
+    # Scale scroll region world → minimap pixel
+    set vsx [expr {($vwx1 - $wx1) * $sc + 2}]
+    set vsy [expr {($vwy1 - $wy1) * $sc + 2}]
+    set vex [expr {($vwx2 - $wx1) * $sc + 2}]
+    set vey [expr {($vwy2 - $wy1) * $sc + 2}]
+    set vw [expr {max(4, $vex - $vsx)}]
+    set vh [expr {max(4, $vey - $vsy)}]
+
+    $ctx rect $vsx $vsy $vw $vh         -fill {0.2 0.5 1.0 0.12}         -stroke {0.4 0.7 1.0 0.9} -width 1.5
+
+    # Title
+    $ctx text 4 [expr {$mh - 4}] "tclmcairo"         -font "Sans 7" -color {0.4 0.6 0.9 0.8} -anchor sw
+
+    # Convert to Tk photo image
+    if {[catch {$ctx topng} pngdata]} {
+        catch {$ctx destroy}
+        return
+    }
+    $ctx destroy
+
+    if {$minimapPhoto eq ""} {
+        set minimapPhoto [image create photo ::demo::_minimapimg]
+    }
+    $minimapPhoto put $pngdata -format png
+    catch { .minimap.img configure -image $minimapPhoto         -width $mw -height $mh }
+
+    # Click on minimap → scroll canvas
+    bind .minimap.img <ButtonPress-1> [list ::demo::minimapClick %x %y $mw $mh $wx1 $wy1 $ww $wh $sc]
+}
+
+proc ::demo::minimapClick {mx my mw mh wx1 wy1 ww wh sc} {
+    variable canvas
+    # Convert minimap pixel → world coord
+    set wx [expr {($mx - 2) / $sc + $wx1}]
+    set wy [expr {($my - 2) / $sc + $wy1}]
+    # Scroll canvas to center on that world point
+    lassign [$canvas cget -scrollregion] srx1 sry1 srx2 sry2
+    set srw [expr {$srx2 - $srx1}]
+    set srh [expr {$sry2 - $sry1}]
+    set xf [expr {($wx - $srx1) / $srw}]
+    set yf [expr {($wy - $sry1) / $srh}]
+    $canvas xview moveto [expr {$xf - 0.1}]
+    $canvas yview moveto [expr {$yf - 0.1}]
+}
+
 proc ::demo::zoomAt {factor sx sy} {
     variable canvas
     variable zoom
@@ -1336,6 +1940,13 @@ proc ::demo::zoomAt {factor sx sy} {
         setNodeField $id w [expr {[dict get $node w] * $factor}]
         setNodeField $id h [expr {[dict get $node h] * $factor}]
     }
+    dict for {rid room} [allRooms] {
+        setRoomField $rid x [expr {$x + ([dict get $room x] - $x) * $factor}]
+        setRoomField $rid y [expr {$y + ([dict get $room y] - $y) * $factor}]
+        setRoomField $rid w [expr {[dict get $room w] * $factor}]
+        setRoomField $rid h [expr {[dict get $room h] * $factor}]
+    }
+    # Remove variable - rooms now in canvas space like nodes
 
     set ::demo::gridSize \
         [expr {max(8, min(200, int(round($::demo::gridSize * $factor))))}]
@@ -1410,22 +2021,35 @@ proc ::demo::addRandomNode {} {
 proc ::demo::initData {} {
     variable data
     variable nodeCounter
-    set data [dict create nodes {} edges {}]
+    variable roomCounter
+    set data [dict create nodes {} edges {} rooms {}]
     set nodeCounter 0
+    set roomCounter 0
 
+    # Rooms (background)
+    addRoom  40  40 420 340 "Server Room"  "#e8f4e8"
+    addRoom 480  40 420 340 "DMZ"          "#e8eef8"
+    addRoom  40 400 860 220 "Office Floor" "#f8f0e8"
+
+    # Nodes
     set n1 [addNode  80  80 "Input"     "CSV / Oracle / REST"  "#fce5cd" server]
-    set n2 [addNode 360 100 "Normalize" "cleanup + mapping"    "#d9ead3" generic]
+    set n2 [addNode 360 100 "Normalize" "cleanup + mapping"    "#d9ead3" router]
     set n3 [addNode 680 180 "Database"  "SQLite / PostgreSQL"  "#d0e0e3" database]
-    set n4 [addNode 360 300 "UI Layer"  "tablelist + form"     "#ead1dc" workstation]
-    set n5 [addNode 700 380 "Export"    "PDF / Label / Mail"   "#fff2cc" server]
-    set n6 [addNode  80 320 "Log"       "status + errors"      "#f4cccc" generic]
+    set n4 [addNode 360 440 "UI Layer"  "tablelist + form"     "#ead1dc" workstation]
+    set n5 [addNode 700 460 "Export"    "PDF / Label / Mail"   "#fff2cc" printer]
+    set n6 [addNode  80 440 "Log"       "status + errors"      "#f4cccc" server]
+    set n7 [addNode 560 100 "Firewall"  "packet filter"        "#fce5cd" firewall]
+    set n8 [addNode 820 100 "AP"        "wireless access"      "#d0e0e3" accesspoint]
 
-    addEdge "$n1:right"  "$n2:left"
-    addEdge "$n2:right"  "$n3:left"
-    addEdge "$n2:bottom" "$n4:top"
-    addEdge "$n4:right"  "$n5:left"
-    addEdge "$n1:bottom" "$n6:top"
-    addEdge "$n6:right"  "$n4:left"
+    addEdge "$n1:right"  "$n2:left"   ethernet
+    addEdge "$n2:right"  "$n7:left"   fiber
+    addEdge "$n7:right"  "$n3:left"   ethernet
+    addEdge "$n7:right"  "$n8:left"   fiber
+    addEdge "$n2:bottom" "$n4:top"    ethernet
+    addEdge "$n4:right"  "$n5:left"   ethernet
+    addEdge "$n1:bottom" "$n6:top"    ethernet
+    addEdge "$n6:right"  "$n4:left"   ethernet
+    addEdge "$n8:bottom" "$n4:top"    wlan
 }
 
 # ============================================================

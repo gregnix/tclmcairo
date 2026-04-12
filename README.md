@@ -3,9 +3,9 @@
 A lightweight Cairo binding for Tcl — no Tk required.
 Runs in `tclsh`. Outputs PNG, PDF, SVG, PS, EPS.
 
-**Version:** 0.3.2 · **License:** BSD · **Tcl:** 8.6 / 9.0  
+**Version:** 0.3.3 · **License:** BSD · **Tcl:** 8.6 / 9.0  
 **Platform:** Linux, Windows (MSYS2 MINGW64, BAWT 3.2), macOS  
-**Tests:** 186/186 (Linux tclmcairo) · 63/63 (Linux canvas2cairo) · 170/170 (Windows)
+**Tests:** 187/187 (Linux tclmcairo) · 67/67 (Linux canvas2cairo) · 170/170 (Windows)
 
 ---
 
@@ -144,8 +144,8 @@ See `INSTALL.md` for installation instructions.
 
 After `make install` all files land in one directory:
 ```
-/usr/lib/tcltk/tclmcairo0.3.2/   libtclmcairo.so  pkgIndex.tcl
-                                tclmcairo-0.3.tm  canvas2cairo-0.1.tm
+/usr/lib/tcltk/tclmcairo0.3.3/   libtclmcairo.so  pkgIndex.tcl
+                                tclmcairo-0.3.3.tm  canvas2cairo-0.1.tm
 ```
 
 ---

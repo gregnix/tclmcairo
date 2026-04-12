@@ -27,17 +27,48 @@ namespace export export render
 # Public API
 # ================================================================
 
-proc export {canvas filename args} {
-    # Options: -scale factor  -viewport {x1 y1 x2 y2}  -background color
-    set scale    1.0
-    set viewport ""
+proc export {canvas args} {
+    # Usage:
+    #   canvas2cairo::export .c filename.pdf ?-scale f? ?-viewport {..}?
+    #   canvas2cairo::export .c -chan channel -format fmt ?-scale f? ?-viewport {..}?
+    #
+    # Detect if first arg is a filename or an option
+    set filename ""
+    if {[llength $args] > 0 && [string index [lindex $args 0] 0] ne "-"} {
+        set filename [lindex $args 0]
+        set args [lrange $args 1 end]
+    }
+
+    set scale       1.0
+    set viewport    ""
     set bg_override ""
+    set chan_out    ""
+    set chan_fmt    "pdf"
     foreach {k v} $args {
         switch $k {
             -scale      { set scale [expr {double($v)}] }
             -viewport   { set viewport $v }
             -background { set bg_override $v }
+            -chan        { set chan_out $v }
+            -format     { set chan_fmt $v }
         }
+    }
+
+    # -chan mode: write to channel instead of file
+    if {$chan_out ne ""} {
+        # Security: verify channel is writable + set binary mode
+        if {[catch {puts -nonewline $chan_out ""} err]} {
+            error "canvas2cairo: channel is not writable: $err"
+        }
+        if {[catch {fconfigure $chan_out -translation binary} err]} {
+            error "canvas2cairo: cannot set binary mode on channel: $err"
+        }
+        _export_chan $canvas $chan_out $chan_fmt $scale $viewport
+        return
+    }
+
+    if {$filename eq ""} {
+        error "canvas2cairo::export: filename required"
     }
 
     # Determine canvas size
@@ -127,6 +158,70 @@ proc _apply_render {canvas ctx scale vx vy {vw 0} {vh 0}} {
     } else {
         render $canvas $ctx
     }
+}
+
+# Internal: export canvas to open channel
+proc _export_chan {canvas chan fmt scale viewport} {
+    # Determine canvas size
+    set w [$canvas cget -width]
+    set h [$canvas cget -height]
+    set ww [winfo width  $canvas]
+    set wh [winfo height $canvas]
+    if {$ww > 1} { set w $ww }
+    if {$wh > 1} { set h $wh }
+
+    # Scrollregion
+    set sr_ox 0; set sr_oy 0
+    if {$viewport eq ""} {
+        set sr [$canvas cget -scrollregion]
+        if {$sr ne "" && [llength $sr] == 4} {
+            lassign $sr sr_x1 sr_y1 sr_x2 sr_y2
+            set sw [expr {int($sr_x2 - $sr_x1)}]
+            set sh [expr {int($sr_y2 - $sr_y1)}]
+            if {$sw > 0} { set w $sw }
+            if {$sh > 0} { set h $sh }
+            if {$sr_x1 < 0} { set sr_ox [expr {int($sr_x1)}] }
+            if {$sr_y1 < 0} { set sr_oy [expr {int($sr_y1)}] }
+        }
+    }
+
+    # Viewport
+    set vx 0; set vy 0; set vw $w; set vh $h
+    if {$viewport ne "" && [llength $viewport] == 4} {
+        lassign $viewport vx vy x2 y2
+        set vw [expr {int($x2 - $vx)}]
+        set vh [expr {int($y2 - $vy)}]
+        if {$vw < 1} { set vw 1 }
+        if {$vh < 1} { set vh 1 }
+    }
+
+    set out_w [expr {int(ceil($vw * $scale))}]
+    set out_h [expr {int(ceil($vh * $scale))}]
+    set rx [expr {$vx + $sr_ox}]
+    set ry [expr {$vy + $sr_oy}]
+
+    if {$fmt eq "png"} {
+        set ctx [tclmcairo::new $out_w $out_h]
+        $ctx clear 1 1 1
+        _apply_render $canvas $ctx $scale $rx $ry $vw $vh
+        $ctx save -chan $chan -format png
+        $ctx destroy
+        return
+    }
+
+    # Vector formats (pdf/svg/ps/eps): tclmcairo::new needs -file for
+    # vector mode. Write to tmp file then stream to channel.
+    set tmpf [file join /tmp _c2c_chan_[pid]_[clock microseconds].$fmt]
+    set ctx [tclmcairo::new $out_w $out_h -mode $fmt -file $tmpf]
+    _apply_render $canvas $ctx $scale $rx $ry $vw $vh
+    $ctx finish
+    $ctx destroy
+    # Stream tmp file to channel
+    set fh [open $tmpf rb]
+    fconfigure $fh -translation binary
+    fcopy $fh $chan
+    close $fh
+    file delete -force $tmpf
 }
 
 proc render {canvas ctx {ox 0} {oy 0} {clip_bbox ""}} {

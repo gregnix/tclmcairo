@@ -1,10 +1,41 @@
 # pkgIndex.tcl -- generated from pkgIndex.tcl.in
-# All files in $dir: libtclmcairo.so, tclmcairo-@PACKAGE_VERSION@.tm, canvas2cairo-0.1.tm
+# Files in $dir: libtclmcairo.so/.dll, tclmcairo-@PACKAGE_VERSION@.tm,
+#                canvas2cairo-0.1.tm, shape_renderer-0.1.tm
 
 if {![package vsatisfies [package provide Tcl] 8.6-]} { return }
 
-package ifneeded @PACKAGE_NAME@ @PACKAGE_VERSION@ \
-    [list source [file join $dir @PACKAGE_NAME@-@PACKAGE_VERSION@.tm]]
+# Load the C extension directly, then source the OO wrapper
+package ifneeded @PACKAGE_NAME@ @PACKAGE_VERSION@ [list apply {{dir ver} {
+    if {$::tcl_platform(platform) eq "windows"} {
+        # Pre-load Cairo dependencies with absolute paths
+        # so Windows finds them before loading tclmcairo.dll
+        foreach dep {
+            libbz2-1.dll
+            zlib1.dll
+            libpng16-16.dll
+            libexpat-1.dll
+            libpcre2-8-0.dll
+            libiconv-2.dll
+            libintl-8.dll
+            libglib-2.0-0.dll
+            libgraphite2.dll
+            libharfbuzz-0.dll
+            libbrotlicommon.dll
+            libbrotlidec.dll
+            libfreetype-6.dll
+            libfontconfig-1.dll
+            libpixman-1-0.dll
+            libcairo-2.dll
+        } {
+            set p [file join $dir $dep]
+            if {[file exists $p]} { catch {load $p} }
+        }
+        load [file join $dir tclmcairo.dll]
+    } else {
+        load [file join $dir libtclmcairo.so]
+    }
+    source [file join $dir tclmcairo-${ver}.tm]
+}} $dir @PACKAGE_VERSION@]
 
 package ifneeded canvas2cairo 0.1 \
     [list source [file join $dir canvas2cairo-0.1.tm]]

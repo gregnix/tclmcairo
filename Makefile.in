@@ -28,8 +28,9 @@ SHLIB_SUFFIX = @SHLIB_SUFFIX@
 TCL_BIN_DIR = @TCL_BIN_DIR@
 TCL_SRC_DIR = @TCL_SRC_DIR@
 TCL_VERSION = @TCL_VERSION@
-# Override: make TCLSH=tclsh9.0 test
-TCLSH        = tclsh
+# TCLSH defaults to the tclsh from the configured Tcl installation.
+# Override with: make test TCLSH=/path/to/tclsh
+TCLSH        ?= @TCLSH_PROG@
 INSTALL         = install
 INSTALL_DATA    = install -m 644
 INSTALL_PROGRAM = install -m 755

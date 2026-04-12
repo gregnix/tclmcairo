@@ -1,0 +1,83 @@
+THIRD-PARTY LICENSES
+====================
+
+tclmcairo itself is BSD-licensed (see LICENSE).
+
+On Windows, tclmcairo.dll links against Cairo and its dependencies.
+The following third-party libraries may be distributed alongside tclmcairo:
+
+
+1. Cairo
+-------
+File:    libcairo-2.dll
+License: GNU Lesser General Public License version 2.1 (LGPL 2.1)
+Website: https://cairographics.org/
+Source:  https://gitlab.freedesktop.org/cairo/cairo
+
+LGPL 2.1 redistribution notice:
+  You may redistribute libcairo-2.dll as part of an application.
+  The user retains the right to replace libcairo-2.dll with a compatible
+  version. Since tclmcairo source code is included, relinking is possible.
+  Full license text: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html
+
+
+2. Pixman
+---------
+File:    libpixman-1-0.dll
+License: MIT License
+Website: https://pixman.org/
+Source:  https://gitlab.freedesktop.org/pixman/pixman
+
+Permission is hereby granted, free of charge, to any person obtaining a
+copy of this software and associated documentation files (the "Software"),
+to deal in the Software without restriction, including without limitation
+the rights to use, copy, modify, merge, publish, distribute, sublicense,
+and/or sell copies of the Software.
+
+
+3. Fontconfig
+-------------
+File:    libfontconfig-1.dll
+License: MIT/Expat License
+Website: https://fontconfig.org/
+Source:  https://gitlab.freedesktop.org/fontconfig/fontconfig
+
+Permission to use, copy, modify, distribute, and sell this software and
+its documentation for any purpose is hereby granted without fee, provided
+that the above copyright notices and this permission notice appear in all
+copies of the software and related documentation.
+
+
+4. GCC Runtime Libraries
+------------------------
+Files:   libstdc++-6.dll, libgcc_s_seh-1.dll, libwinpthread-1.dll
+License: GPL v3 with GCC Runtime Library Exception
+Website: https://gcc.gnu.org/
+Source:  https://gcc.gnu.org/
+
+GCC Runtime Library Exception (version 3.1):
+  You may distribute a Combined Work that combines GCC Runtime Libraries
+  with a non-GPL application, provided the application is not itself GPL.
+  This exception means these DLLs can be freely distributed alongside
+  tclmcairo without the GPL requirements applying to tclmcairo itself.
+  Full license: https://www.gnu.org/licenses/gcc-exception-3.1.html
+
+
+5. FreeType
+-----------
+File:    libfreetype-6.dll
+License: FreeType License (BSD-style) or GPL v2
+Website: https://freetype.org/
+Source:  https://gitlab.freedesktop.org/freetype/freetype
+
+You may choose to use FreeType under either the FreeType License or the
+GNU General Public License version 2. Both permit free redistribution.
+Full license: https://freetype.org/license.html
+
+
+NOTES
+-----
+- install-deps-win.bat copies these DLLs from MSYS2 MINGW64.
+- BAWT installations may already include compatible versions.
+- tclmcairo source code is provided so users can relink against
+  different versions of any LGPL library (Cairo requirement).

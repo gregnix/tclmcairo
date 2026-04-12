@@ -19,7 +19,7 @@
 #   ./configure --with-tcl=/usr/lib/tcl8.6 --disable-jpeg
 #-----------------------------------------------------------------------
 
-AC_INIT([tclmcairo], [0.3.2])
+AC_INIT([tclmcairo], [0.3.3])
 
 TEA_INIT([3.9])
 
@@ -32,7 +32,26 @@ AC_CONFIG_AUX_DIR(tclconfig)
 TEA_PATH_TCLCONFIG
 TEA_LOAD_TCLCONFIG
 
-# TCLSH_PROG fuer Makefile verfuegbar machen
+# Derive TCLSH_PROG from the configured Tcl installation.
+# This ensures 'make test' uses the same tclsh that was used to configure,
+# not whatever 'tclsh' is first in PATH (which may be a different version).
+# User can still override: make test TCLSH=/path/to/tclsh
+if test -z "$TCLSH_PROG"; then
+    # Try versioned name first (tclsh9.0, tclsh8.6), then plain tclsh
+    for candidate in \
+        "${TCL_EXEC_PREFIX}/bin/tclsh${TCL_VERSION}" \
+        "${TCL_EXEC_PREFIX}/bin/tclsh${TCL_MAJOR_VERSION}.${TCL_MINOR_VERSION}" \
+        "${TCL_EXEC_PREFIX}/bin/tclsh" \
+        ; do
+        if test -x "$candidate"; then
+            TCLSH_PROG="$candidate"
+            break
+        fi
+    done
+    if test -z "$TCLSH_PROG"; then
+        TCLSH_PROG="tclsh"
+    fi
+fi
 AC_SUBST(TCLSH_PROG)
 
 TEA_PREFIX
@@ -123,7 +142,7 @@ TEA_ADD_INCLUDES([])
 TEA_ADD_LIBS([-lm])
 TEA_ADD_CFLAGS([])
 TEA_ADD_STUB_SOURCES([])
-TEA_ADD_TCL_SOURCES([tcl/tclmcairo-0.3.2.tm tcl/canvas2cairo-0.1.tm tcl/shape_renderer-0.1.tm])
+TEA_ADD_TCL_SOURCES([tcl/tclmcairo-0.3.3.tm tcl/canvas2cairo-0.1.tm tcl/shape_renderer-0.1.tm])
 
 #--------------------------------------------------------------------
 # Tcl Public Headers

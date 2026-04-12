@@ -86,6 +86,13 @@ proc ::shape_renderer::_render_shape_ctx {type w h color label zoom ctx} {
         database    { _shape_database    $ctx $w $h $color $zoom }
         workstation { _shape_workstation $ctx $w $h $color $zoom }
         table       { _shape_table       $ctx $w $h $color $zoom }
+        printer     { _shape_printer     $ctx $w $h $color $zoom }
+        scanner     { _shape_scanner     $ctx $w $h $color $zoom }
+        accesspoint { _shape_accesspoint $ctx $w $h $color $zoom }
+        phone       { _shape_phone       $ctx $w $h $color $zoom }
+        wifi        { _shape_wifi        $ctx $w $h $color $zoom }
+        fiber       { _shape_fiber       $ctx $w $h $color $zoom }
+        building    { _shape_building    $ctx $w $h $color $zoom }
         default     { _shape_generic     $ctx $w $h $color $zoom }
     }
     if {$label ne ""} { _draw_label $ctx $w $h $label $zoom }
@@ -128,8 +135,28 @@ proc ::shape_renderer::_lighter {color {factor 1.4}} {
 
 proc ::shape_renderer::_draw_label {ctx w h label zoom} {
     set size [expr {max(8, int(11 * $zoom))}]
+    set font "Sans $size"
+    set maxw [expr {$w - 6*$zoom}]
+
+    # Measure text — truncate if too wide
+    if {[catch {
+        set ext [$ctx text_extents [$ctx id] $label -font $font]
+        set tw [dict get $ext width]
+        if {$tw > $maxw && [string length $label] > 4} {
+            # Truncate with ellipsis
+            set l $label
+            while {$tw > $maxw && [string length $l] > 3} {
+                set l [string range $l 0 end-1]
+                set ext [$ctx text_extents [$ctx id] "${l}…" -font $font]
+                set tw [dict get $ext width]
+            }
+            set label "${l}…"
+        }
+    }]} {
+        # text_extents not available — use label as-is
+    }
     $ctx text [expr {$w/2.0}] [expr {$h - 4*$zoom}] $label \
-        -font "Sans $size" -color {0.1 0.1 0.1} -anchor s
+        -font $font -color {0.1 0.1 0.1} -anchor s
 }
 
 # ================================================================
@@ -570,11 +597,11 @@ proc ::shape_renderer::_shape_accesspoint {ctx w h color zoom} {
     set lw [expr {max(1.5, $zoom*1.5)}]
 
     # Signal arcs (background, wide)
-    set arccolor [_lighter $color 1.4]
+    lassign [_lighter $color 1.4] ar ag ab
     foreach {r alpha} {0.45 0.15  0.35 0.25  0.25 0.4} {
         set rad [expr {min($w,$h) * $r}]
-        $ctx arc $cx [expr {$h*0.62}] $rad $rad 200 140 \
-            -stroke [list {*}$arccolor $alpha] \
+        $ctx arc $cx [expr {$h*0.62}] $rad 200 140 \
+            -stroke [list $ar $ag $ab $alpha] \
             -width [expr {$lw * 2.5}]
     }
 
@@ -646,7 +673,7 @@ proc ::shape_renderer::_shape_wifi {ctx w h color zoom} {
     set cx  [expr {$w/2.0}]
     set cy  [expr {$h*0.62}]
     set lw  [expr {max(2.5, $zoom*2.5)}]
-    set col $color
+    lassign $color cr cg cb
 
     # Three arcs, decreasing size
     foreach {r alpha} {
@@ -655,8 +682,8 @@ proc ::shape_renderer::_shape_wifi {ctx w h color zoom} {
         0.14 0.7
     } {
         set rad [expr {min($w,$h) * $r}]
-        $ctx arc $cx $cy $rad $rad 210 120 \
-            -stroke [list {*}$col $alpha] -width $lw
+        $ctx arc $cx $cy $rad 210 120 \
+            -stroke [list $cr $cg $cb $alpha] -width $lw
     }
 
     # Center dot

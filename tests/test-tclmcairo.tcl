@@ -1780,9 +1780,9 @@ test lowlevel-1.16 {rel_move_to moves current point} -body {
 # ================================================================
 
 # Fix 1: package version consistency
-test robustness-1.0 {package version is 0.3.2} -body {
+test robustness-1.0 {package version is 0.3.3} -body {
     package present tclmcairo
-} -result 0.3.2
+} -result 0.3.3
 
 # Fix 5: low-level commands check argument count
 test robustness-1.1 {move_to requires x y} -body {
@@ -1911,12 +1911,34 @@ test save-chan-4 {save -chan -format png from vector context} -body {
     expr {$sz > 100}
 } -result 1
 
-test save-chan-5 {save -chan unknown channel gives error} -body {
+test save-chan-6 {save -chan read-only channel gives error} -body {
     set ctx [tclmcairo::new 100 100]
+    $ctx clear 0.5 0.5 0.5
+    set f [file join /tmp test_chan_ro_[pid].pdf]
+    # Create file first, then open read-only
+    close [open $f w]
+    set ch [open $f rb]
     set err ""
-    catch { $ctx save -chan nosuch_channel_xyz -format pdf } err
+    catch { $ctx save -chan $ch -format pdf } err
+    close $ch
     $ctx destroy
-    expr {$err ne ""}
+    file delete -force $f
+    string match "*not writable*" $err
+} -result 1
+
+test save-chan-7 {save -chan text-mode channel produces valid PDF} -body {
+    set ctx [tclmcairo::new 100 100]
+    $ctx clear 1 1 1
+    $ctx circle 50 50 30 -fill {0.2 0.5 1}
+    set f [file join /tmp test_chan_txt_[pid].pdf]
+    set ch [open $f w]   ;# text mode — should be auto-fixed to binary
+    $ctx save -chan $ch -format pdf
+    close $ch
+    $ctx destroy
+    # Valid PDF starts with %PDF
+    set hdr [read [set fh [open $f rb]] 5]; close $fh
+    file delete -force $f
+    string match "%PDF*" $hdr
 } -result 1
 
 # ================================================================

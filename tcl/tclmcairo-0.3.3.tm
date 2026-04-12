@@ -44,7 +44,7 @@
 #
 #   $ctx destroy
 
-package provide tclmcairo 0.3.2
+package provide tclmcairo 0.3.3
 
 namespace eval ::tclmcairo {
     variable _libloaded 0
@@ -71,7 +71,7 @@ namespace eval ::tclmcairo {
             [pwd] \
             [file join [pwd] lib] \
         ]
-        # Windows split layout: .tm in lib/tcl8/8.6/ → .dll in lib/tclmcairo0.3.2/
+        # Windows split layout: .tm in lib/tcl8/8.6/ → .dll in lib/tclmcairo0.3.3/
         # Go up 2 levels from tmdir and search for tclmcairo* subdirs
         set _parent2 [file normalize [file join $_tmdir .. ..]]
         foreach _pkgdir [glob -nocomplain -directory $_parent2 tclmcairo*] {
@@ -108,19 +108,26 @@ namespace eval ::tclmcairo {
             }
         }
 
-        # Collect what was found for diagnostics
+        # Collect what was found for diagnostics (deduplicated)
         set found {}
         foreach d $dirs {
             foreach p [glob -nocomplain -directory $d {libtclmcairo*} {tclmcairo.dll}] {
-                if {[file isfile $p]} { lappend found [file normalize $p] }
+                set pn [file normalize $p]
+                if {[file isfile $pn] && $pn ni $found} { lappend found $pn }
             }
         }
         set libname [expr {$::tcl_platform(platform) eq "windows" ? "tclmcairo.dll" : "libtclmcairo.so"}]
-        set msg "$libname not found (searched: [join $dirs {, }])"
+        # Deduplicate search dirs for cleaner error output
+        set udirs {}
+        foreach d $dirs { if {$d ni $udirs} { lappend udirs $d } }
+        set msg "$libname not found\n"
+        append msg "Searched: [join $udirs {, }]\n"
         if {[llength $found]} {
-            append msg "\nFiles found but not loadable: [join $found {, }]"
+            append msg "Found but not loadable: [join $found {, }]\n"
+            append msg "Hint: rebuild with the correct Tcl version"
+        } else {
+            append msg "Hint: set TCLMCAIRO_LIBDIR or run 'make' first"
         }
-        append msg "\nSet TCLMCAIRO_LIBDIR or run 'make' first"
         error $msg
     }
 }
@@ -245,6 +252,7 @@ oo::define tclmcairo::context {
 oo::define tclmcairo::context {
     # -- 0.3 Prio-3 features --
     method font_options  {args}      { tclmcairo font_options  $_id {*}$args }
+    method text_extents  {text args} { tclmcairo text_extents  $_id $text {*}$args }
     method path_get      {}          { tclmcairo path_get      $_id }
     # surface_copy: returns new raw C context id (not a TclOO object)
     # Use: set copy [tclmcairo::new ...] then tclmcairo surface_copy $id

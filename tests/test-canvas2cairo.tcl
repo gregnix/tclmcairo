@@ -614,6 +614,64 @@ test canvas2cairo-text-extents-justify-2 {multiline text justify right exports w
     set err
 } -result 0
 
+# ================================================================
+# New in 0.3.3: canvas2cairo::export -chan
+# ================================================================
+
+test canvas2cairo-chan-1 {export -chan -format png writes PNG bytes} -constraints hasTk -body {
+    set c [canvas .test_cc1 -width 200 -height 150]
+    $c create rectangle 20 20 180 130 -fill lightblue -outline navy
+    $c create text 100 75 -text "chan test" -font {TkDefaultFont 12}
+    set f /tmp/test_cc1_[pid].png
+    set ch [open $f wb]
+    set err [catch {canvas2cairo::export $c -chan $ch -format png} msg]
+    close $ch
+    set sz [file size $f]
+    file delete -force $f
+    destroy .test_cc1
+    list $err [expr {$sz > 100}]
+} -result {0 1}
+
+test canvas2cairo-chan-2 {export -chan -format pdf writes PDF bytes} -constraints hasTk -body {
+    set c [canvas .test_cc2 -width 200 -height 150]
+    $c create oval 20 20 180 130 -fill salmon
+    set f /tmp/test_cc2_[pid].pdf
+    set ch [open $f wb]
+    set err [catch {canvas2cairo::export $c -chan $ch -format pdf} msg]
+    close $ch
+    set hdr [read [set fh [open $f rb]] 5]; close $fh
+    file delete -force $f
+    destroy .test_cc2
+    list $err [string match "%PDF*" $hdr]
+} -result {0 1}
+
+test canvas2cairo-chan-3 {export -chan -scale 2.0 -format png} -constraints hasTk -body {
+    set c [canvas .test_cc3 -width 100 -height 80]
+    $c create rectangle 5 5 95 75 -fill green
+    set f /tmp/test_cc3_[pid].png
+    set ch [open $f wb]
+    set err [catch {canvas2cairo::export $c -chan $ch -format png -scale 2.0} msg]
+    close $ch
+    set sz [file size $f]
+    file delete -force $f
+    destroy .test_cc3
+    list $err [expr {$sz > 100}]
+} -result {0 1}
+
+test canvas2cairo-chan-4 {export -chan read-only gives error} -constraints hasTk -body {
+    set c [canvas .test_cc4 -width 100 -height 80]
+    $c create rectangle 5 5 95 75 -fill red
+    set f /tmp/test_cc4_[pid].png
+    close [open $f w]
+    set ch [open $f rb]
+    set err ""
+    catch {canvas2cairo::export $c -chan $ch -format png} err
+    close $ch
+    file delete -force $f
+    destroy .test_cc4
+    string match "*not writable*" $err
+} -result 1
+
 
 cleanup_tmpfiles
 cleanupTests

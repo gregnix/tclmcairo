@@ -2,7 +2,7 @@
 
 Cairo 2D graphics for Tcl. No Tk required. Runs in `tclsh`.
 
-**Version:** 0.3.2 · **License:** BSD · **Tcl:** 8.6 / 9.0  **Platform:** Linux, Windows (MSYS2, BAWT), macOS  
+**Version:** 0.3.3 · **License:** BSD · **Tcl:** 8.6 / 9.0  **Platform:** Linux, Windows (MSYS2, BAWT), macOS  
 **Repository:** https://github.com/gregnix/tclmcairo
 
 ---
@@ -512,7 +512,20 @@ $ctx finish; $ctx destroy
 **New in 0.3.2:** `-smooth raw/1`, `-underline`, `-arrowshape`, `-justify`,
 `-scale`, `-viewport`, scroll position, negative scrollregion, polygon outline-only,
 `_apply_render` namespace fix, `clip_bbox` fix  
+**New in 0.3.3:** `export -chan channel -format fmt` — write directly to channel  
 **Not supported:** window (embedded widgets), bitmap, stipple patterns
+
+**Export to channel (new in 0.3.3):**
+```tcl
+set ch [open report.pdf wb]
+canvas2cairo::export .canvas -chan $ch -format pdf
+close $ch
+
+# Combined with scale
+set ch [open hires.png wb]
+canvas2cairo::export .canvas -chan $ch -format png -scale 2.0
+close $ch
+```
 
 **Before export, always call:**
 ```tcl

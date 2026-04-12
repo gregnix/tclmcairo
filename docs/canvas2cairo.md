@@ -1,6 +1,6 @@
 # canvas2cairo — API Reference
 
-Version 0.1 · tclmcairo 0.3.2 · BSD License · Requires: tclmcairo + Tk
+Version 0.1 · tclmcairo 0.3.3 · BSD License · Requires: tclmcairo + Tk
 
 ---
 
@@ -22,7 +22,8 @@ package require canvas2cairo
 ## export
 
 ```tcl
-canvas2cairo::export canvas filename
+canvas2cairo::export canvas filename ?options?
+canvas2cairo::export canvas -chan channel -format fmt ?options?
 ```
 
 Exports the canvas to a file. The output format is determined by the
@@ -49,6 +50,16 @@ canvas2cairo::export .c output.svg -viewport {50 50 600 400}
 
 # Combined: region + scale
 canvas2cairo::export .c output.png -viewport {0 0 400 300} -scale 2.0
+
+# Write to channel (new in 0.3.3)
+set ch [open report.pdf wb]
+canvas2cairo::export .c -chan $ch -format pdf
+close $ch
+
+# Channel + HiDPI scale
+set ch [open hires.png wb]
+canvas2cairo::export .c -chan $ch -format png -scale 2.0
+close $ch
 ```
 
 **Options:**
@@ -57,6 +68,11 @@ canvas2cairo::export .c output.png -viewport {0 0 400 300} -scale 2.0
 |--------|--------|---------|-------------|
 | `-scale` | float | `1.0` | Output scale factor (HiDPI) |
 | `-viewport` | `{x1 y1 x2 y2}` | — | Export only this canvas region |
+| `-chan` | channel | — | Write to open channel instead of file |
+| `-format` | `pdf svg ps eps png` | `pdf` | Format when using `-chan` |
+
+**Channel safety:** the channel must be writable — a read-only channel raises an
+error. Binary translation is set automatically (`-translation binary`).
 
 **Canvas size:** reads `[$canvas cget -width/height]`. Scrollregion is honoured
 (including negative origins like `{-500 -500 1000 1000}`).

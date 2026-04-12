@@ -1,5 +1,37 @@
 # tclmcairo Changelog
 
+## v0.3.3 (2026-04-11)
+
+**Windows: DLL loading fully resolved**
+
+`pkgIndex.tcl` pre-loads all Cairo dependency DLLs with absolute paths
+before loading `tclmcairo.dll`. No PATH modification, no admin rights,
+works with BAWT Tcl and any other Tcl installation.
+
+`build-win.bat` copies all 19 required MSYS2 DLLs into `dist\tclmcairo0.3.3\`
+automatically. Install with:
+
+```bat
+xcopy /e /i dist\tclmcairo0.3.3 C:\Tcl\lib\tclmcairo0.3.3
+```
+
+Required DLLs (all from MSYS2 `mingw64\bin\`):
+`libcairo-2.dll` `libpixman-1-0.dll` `libfreetype-6.dll` `libfontconfig-1.dll`
+`libexpat-1.dll` `libharfbuzz-0.dll` `libglib-2.0-0.dll` `libgraphite2.dll`
+`libbrotlidec.dll` `libbrotlicommon.dll` `libintl-8.dll` `libiconv-2.dll`
+`libbz2-1.dll` `libpcre2-8-0.dll` `libpng16-16.dll` `zlib1.dll`
+`libgcc_s_seh-1.dll` `libstdc++-6.dll` `libwinpthread-1.dll`
+
+**Windows test result: 187/187 ✔**
+
+**`save -chan`**: write-mode check + auto binary translation
+
+**`canvas2cairo::export -chan`**: export directly to a Tcl channel
+
+**`make test/demo`**: auto-detect tclsh from configured prefix
+
+**`THIRD-PARTY-LICENSES.txt`**: license info for all redistributed DLLs
+
 ## v0.3.2 (2026-04-11)
 
 ### New Features

@@ -546,6 +546,73 @@ test image-1.3 {image bad file -> error} -body {
     expr {$err ne ""}
 } -result 1
 
+
+
+# ================================================================
+# select_font_face
+# ================================================================
+test select_font_face-1.0 {select_font_face sets font family} -body {
+    set f [tmpfile png]
+    set ctx [tclmcairo::new 300 100]
+    $ctx clear 1 1 1
+    $ctx select_font_face "Serif" -slant normal -weight bold -size 20
+    $ctx text 10 60 "Bold Serif" -color {0 0 0}
+    $ctx save $f
+    $ctx destroy
+    file size $f
+} -match glob -result {[0-9]*}
+
+test select_font_face-1.1 {select_font_face italic} -body {
+    set f [tmpfile png]
+    set ctx [tclmcairo::new 300 100]
+    $ctx clear 1 1 1
+    $ctx select_font_face "Sans" -slant italic -weight normal -size 16
+    $ctx text 10 60 "Italic Sans" -color {0 0 0}
+    $ctx save $f
+    $ctx destroy
+    file size $f
+} -match glob -result {[0-9]*}
+
+# ================================================================
+# text_extents — full dict
+# ================================================================
+test text_extents-2.0 {text_extents returns full dict} -body {
+    set ctx [tclmcairo::new 10 10]
+    set d [$ctx text_extents "Hello" -font "Sans 14"]
+    $ctx destroy
+    lsort [dict keys $d]
+} -result {ascent descent height line_height width x_advance x_bearing y_advance y_bearing}
+
+test text_extents-2.1 {text_extents values are numeric} -body {
+    set ctx [tclmcairo::new 10 10]
+    set d [$ctx text_extents "Test" -font "Sans 12"]
+    $ctx destroy
+    expr {[dict get $d width] > 0 && [dict get $d ascent] > 0}
+} -result 1
+
+# ================================================================
+# image_size
+# ================================================================
+test image_size-1.0 {image_size returns width height for PNG} -body {
+    # Use one of the demo PNGs as test image
+    set testimg [file normalize [file join [file dirname [info script]] ../demos/demo-blit-icons.png]]
+    if {![file exists $testimg]} {
+        return "skip"
+    }
+    set ctx [tclmcairo::new 10 10]
+    set result [$ctx image_size $testimg]
+    $ctx destroy
+    expr {[llength $result] == 2 && [lindex $result 0] > 0 && [lindex $result 1] > 0}
+} -result 1
+
+test image_size-1.1 {image_size bad file -> error} -body {
+    set ctx [tclmcairo::new 10 10]
+    set err ""
+    catch { $ctx image_size /nonexistent/file.png } err
+    $ctx destroy
+    expr {$err ne ""}
+} -result 1
+
 # ================================================================
 # v0.2 — text_path
 # ================================================================

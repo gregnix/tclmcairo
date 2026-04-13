@@ -216,7 +216,9 @@ oo::define tclmcairo::context {
     method clip_reset {}         { tclmcairo clip_reset $_id }
 
     # -- Images --
-    method image {filename x y args} { tclmcairo image $_id $filename $x $y {*}$args }
+    method image      {filename x y args} { tclmcairo image      $_id $filename $x $y {*}$args }
+    method image_size       {filename}          { tclmcairo image_size       $_id $filename }
+    method select_font_face {family args}       { tclmcairo select_font_face $_id $family {*}$args }
 
     # -- Blit (context compositing) --
     method blit {src x y args}       { tclmcairo blit  $_id [$src id] $x $y {*}$args }

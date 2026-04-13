@@ -1,6 +1,25 @@
 # tclmcairo Changelog
 
-## v0.3.3 (2026-04-11)
+## v0.3.3 (2026-04-12)
+
+**`image_size`** — read PNG/JPEG dimensions without drawing:
+```tcl
+lassign [$ctx image_size $file] w h
+```
+
+**`select_font_face`** — direct font family/slant/weight control:
+```tcl
+$ctx select_font_face "Serif" -slant italic -weight bold -size 18
+```
+Complements `-font` string parsing — avoids re-parsing overhead in
+draw loops where the font doesn't change.
+
+**`text_extents` — full dict** (9 keys):
+`width height x_bearing y_bearing x_advance y_advance ascent descent line_height`
+
+**193/193 tests: Tcl 8.6 + Tcl 9.0**
+
+## v0.3.3 (2026-04-11) [base]
 
 **Windows: DLL loading fully resolved**
 

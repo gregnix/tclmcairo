@@ -104,7 +104,7 @@ puts "OK: [file size /tmp/test.png] bytes"
 
 ## Windows (MSYS2 / BAWT)
 
-
+**Do not install into `C:\Program Files\`** — that requires admin rights.
 
 ### Build + Install (one step)
 

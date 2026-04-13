@@ -41,7 +41,8 @@
  *   tclmcairo push       handle              (cairo_save)
  *   tclmcairo pop        handle              (cairo_restore)
  *
- *   tclmcairo font_measure handle string font -> {width height ascent descent}
+ *   tclmcairo font_measure      handle string font -> {width height ascent descent}
+ *   tclmcairo select_font_face  handle family ?-slant s? ?-weight w? ?-size n?
  *   tclmcairo transform handle -translate x y | -scale sx sy | -rotate deg | -reset
  *
  *   tclmcairo gradient_linear handle name x1 y1 x2 y2 stops
@@ -1363,6 +1364,52 @@ static cairo_surface_t *load_jpeg(const char *filename,
 }
 #endif /* HAVE_LIBJPEG */
 
+/* ================================================================== */
+/* tclmcairo image_size id filename -> {width height}                  */
+/* Returns the pixel dimensions of a PNG or JPEG file without drawing  */
+/* ================================================================== */
+static int CairoImageSizeCmd(ClientData cd, Tcl_Interp *interp,
+    int objc, Tcl_Obj *const objv[])
+{
+    (void)cd;
+    if (objc < 4) {
+        Tcl_WrongNumArgs(interp,2,objv,"id filename");
+        return TCL_ERROR;
+    }
+    /* id is required for API consistency but not used for size query */
+    const char *fname = Tcl_GetString(objv[3]);
+
+    int width = 0, height = 0;
+    cairo_surface_t *surf = cairo_image_surface_create_from_png(fname);
+    if (cairo_surface_status(surf) == CAIRO_STATUS_SUCCESS) {
+        width  = cairo_image_surface_get_width(surf);
+        height = cairo_image_surface_get_height(surf);
+        cairo_surface_destroy(surf);
+    } else {
+        cairo_surface_destroy(surf);
+#ifdef HAVE_LIBJPEG
+        /* Try JPEG */
+        surf = load_jpeg(fname, NULL, NULL);
+        if (surf && cairo_surface_status(surf) == CAIRO_STATUS_SUCCESS) {
+            width  = cairo_image_surface_get_width(surf);
+            height = cairo_image_surface_get_height(surf);
+        }
+        if (surf) cairo_surface_destroy(surf);
+#endif
+    }
+
+    if (width == 0 && height == 0) {
+        Tcl_SetResult(interp, "image_size: cannot read image", TCL_STATIC);
+        return TCL_ERROR;
+    }
+
+    Tcl_Obj *lst = Tcl_NewListObj(0, NULL);
+    Tcl_ListObjAppendElement(interp, lst, Tcl_NewIntObj(width));
+    Tcl_ListObjAppendElement(interp, lst, Tcl_NewIntObj(height));
+    Tcl_SetObjResult(interp, lst);
+    return TCL_OK;
+}
+
 static int CairoImageCmd(ClientData cd, Tcl_Interp *interp,
     int objc, Tcl_Obj *const objv[])
 {
@@ -2260,7 +2307,8 @@ static int CairoSetSourceCmd(ClientData cd, Tcl_Interp *interp,
 /* ================================================================== */
 /* text_extents: measure text dimensions without drawing              */
 /* Usage: $ctx text_extents text ?-font "Sans 12"?                    */
-/* Returns: dict with width height x_bearing y_bearing x_advance      */
+/* Returns: dict with width height x_bearing y_bearing x_advance       */
+/*          y_advance ascent descent line_height                        */
 /* ================================================================== */
 static int CairoTextExtentsCmd(ClientData cd, Tcl_Interp *interp,
     int objc, Tcl_Obj *const objv[])
@@ -2307,8 +2355,10 @@ static int CairoTextExtentsCmd(ClientData cd, Tcl_Interp *interp,
     Tcl_DictObjPut(interp, d, Tcl_NewStringObj("x_bearing",-1), Tcl_NewDoubleObj(ext.x_bearing));
     Tcl_DictObjPut(interp, d, Tcl_NewStringObj("y_bearing",-1), Tcl_NewDoubleObj(ext.y_bearing));
     Tcl_DictObjPut(interp, d, Tcl_NewStringObj("x_advance",-1), Tcl_NewDoubleObj(ext.x_advance));
+    Tcl_DictObjPut(interp, d, Tcl_NewStringObj("y_advance",-1), Tcl_NewDoubleObj(ext.y_advance));
     Tcl_DictObjPut(interp, d, Tcl_NewStringObj("ascent",   -1), Tcl_NewDoubleObj(fext.ascent));
     Tcl_DictObjPut(interp, d, Tcl_NewStringObj("descent",  -1), Tcl_NewDoubleObj(fext.descent));
+    Tcl_DictObjPut(interp, d, Tcl_NewStringObj("line_height",-1), Tcl_NewDoubleObj(fext.height));
     Tcl_SetObjResult(interp, d);
     return TCL_OK;
 }
@@ -2316,6 +2366,49 @@ static int CairoTextExtentsCmd(ClientData cd, Tcl_Interp *interp,
 /* Sets font rendering options. Called before text commands.          */
 /* Without args: returns current settings as dict.                    */
 /* ================================================================== */
+/* ================================================================== */
+/* select_font_face: set current font face by family/slant/weight     */
+/* Usage: $ctx select_font_face family ?-slant normal|italic|oblique? */
+/*                               ?-weight normal|bold?                */
+/* Complements font_options — direct control without font-string      */
+/* ================================================================== */
+static int CairoSelectFontFaceCmd(ClientData cd, Tcl_Interp *interp,
+    int objc, Tcl_Obj *const objv[])
+{
+    (void)cd;
+    if (objc < 4) {
+        Tcl_WrongNumArgs(interp, 2, objv, "id family ?-slant normal|italic|oblique? ?-weight normal|bold? ?-size n?");
+        return TCL_ERROR;
+    }
+    int id; GET_INT(interp, objv[2], id);
+    CairoCtx *c = ctx_find(id);
+    if (!c) { Tcl_SetResult(interp, "invalid id", TCL_STATIC); return TCL_ERROR; }
+
+    const char *family = Tcl_GetString(objv[3]);
+    cairo_font_slant_t  slant  = CAIRO_FONT_SLANT_NORMAL;
+    cairo_font_weight_t weight = CAIRO_FONT_WEIGHT_NORMAL;
+    double size = -1.0;   /* -1 = keep current */
+
+    for (int i = 4; i+1 < objc; i += 2) {
+        const char *opt = Tcl_GetString(objv[i]);
+        const char *val = Tcl_GetString(objv[i+1]);
+        if (!strcmp(opt, "-slant")) {
+            if      (!strcmp(val, "italic"))  slant = CAIRO_FONT_SLANT_ITALIC;
+            else if (!strcmp(val, "oblique")) slant = CAIRO_FONT_SLANT_OBLIQUE;
+            else                              slant = CAIRO_FONT_SLANT_NORMAL;
+        } else if (!strcmp(opt, "-weight")) {
+            if (!strcmp(val, "bold")) weight = CAIRO_FONT_WEIGHT_BOLD;
+            else                      weight = CAIRO_FONT_WEIGHT_NORMAL;
+        } else if (!strcmp(opt, "-size")) {
+            GET_DOUBLE(interp, objv[i+1], size);
+        }
+    }
+
+    cairo_select_font_face(c->cr, family, slant, weight);
+    if (size > 0) cairo_set_font_size(c->cr, size);
+    return TCL_OK;
+}
+
 static int CairoFontOptionsCmd(ClientData cd, Tcl_Interp *interp,
     int objc, Tcl_Obj *const objv[])
 {
@@ -2802,7 +2895,7 @@ static int TkmCairoCmd(ClientData cd, Tcl_Interp *interp,
 {
     if (objc < 2) {
         Tcl_WrongNumArgs(interp, 1, objv,
-            "create|destroy|clear|save|size|todata|newpage|finish|"
+            "create|destroy|clear|save|size|todata|newpage|finish|image_size|select_font_face|"
             "push|pop|clip_rect|clip_path|clip_reset|"
             "image|rect|line|circle|ellipse|arc|poly|path|text|text_path|"
             "font_measure|transform|gradient_linear|gradient_radial ...");
@@ -2828,6 +2921,7 @@ static int TkmCairoCmd(ClientData cd, Tcl_Interp *interp,
     else if (!strcmp(sub,"clip_path"))        return CairoClipPathCmd(cd,interp,objc,objv);
     else if (!strcmp(sub,"clip_reset"))       return CairoClipResetCmd(cd,interp,objc,objv);
     else if (!strcmp(sub,"image"))            return CairoImageCmd(cd,interp,objc,objv);
+    else if (!strcmp(sub,"image_size"))       return CairoImageSizeCmd(cd,interp,objc,objv);
     else if (!strcmp(sub,"blit"))             return CairoBlitCmd(cd,interp,objc,objv);
     else if (!strcmp(sub,"rect"))             return CairoRectCmd(cd,interp,objc,objv);
     else if (!strcmp(sub,"line"))             return CairoLineCmd(cd,interp,objc,objv);
@@ -2852,6 +2946,7 @@ static int TkmCairoCmd(ClientData cd, Tcl_Interp *interp,
     else if (!strcmp(sub,"paint"))            return CairoPaintCmd(cd,interp,objc,objv);
     else if (!strcmp(sub,"set_source"))       return CairoSetSourceCmd(cd,interp,objc,objv);
     else if (!strcmp(sub,"font_options"))     return CairoFontOptionsCmd(cd,interp,objc,objv);
+    else if (!strcmp(sub,"select_font_face")) return CairoSelectFontFaceCmd(cd,interp,objc,objv);
     else if (!strcmp(sub,"text_extents"))     return CairoTextExtentsCmd(cd,interp,objc,objv);
     else if (!strcmp(sub,"path_get"))         return CairoPathGetCmd(cd,interp,objc,objv);
     else if (!strcmp(sub,"surface_copy"))     return CairoSurfaceCopyCmd(cd,interp,objc,objv);

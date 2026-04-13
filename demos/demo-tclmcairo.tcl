@@ -1756,5 +1756,119 @@ puts "  -> $f19svg (SVG via channel)"
 
 $d19 destroy
 
+
+# ==================================================================
+# Demo 20: text_extents + select_font_face (NEU 0.3.3)
+# ==================================================================
+puts "Demo 20: text_extents + select_font_face..."
+
+set f20png [file join $outdir demo-text-extents.png]
+set f20pdf [file join $outdir demo-text-extents.pdf]
+
+proc demo_text_extents {ctx w h} {
+    $ctx clear 0.97 0.97 1.0 1
+
+    # Titel
+    $ctx text [expr {int($w/2)}] 28 "text_extents + select_font_face" \
+        -font "Sans Bold 15" -color {0.1 0.1 0.35} -anchor center
+
+    # select_font_face Demo
+    set ty 60
+    $ctx text 20 $ty "select_font_face:" \
+        -font "Sans Bold 11" -color {0.2 0.2 0.6}
+    set ty 82
+    foreach {family slant weight} {
+        Sans     normal normal
+        Sans     italic normal
+        Sans     normal bold
+        Serif    normal normal
+        Serif    italic bold
+        Monospace normal normal
+    } {
+        $ctx select_font_face $family -slant $slant -weight $weight -size 13
+        $ctx text 30 $ty "$family / $slant / $weight" -color {0.1 0.1 0.1}
+        set ty [expr {$ty + 20}]
+    }
+
+    # text_extents Demo
+    set ty [expr {$ty + 10}]
+    $ctx rect 10 $ty [expr {$w - 20}] 1 -fill {0.75 0.75 0.85}
+    set ty [expr {$ty + 14}]
+    $ctx text 20 $ty "text_extents - 9 Felder:" \
+        -font "Sans Bold 11" -color {0.2 0.2 0.6}
+    set ty [expr {$ty + 30}]
+
+    set ext  [$ctx text_extents "Cairo" -font "Sans Bold 36"]
+    set tw   [dict get $ext width]
+    set th   [dict get $ext height]
+    set xb   [dict get $ext x_bearing]
+    set yb   [dict get $ext y_bearing]
+    set xa   [dict get $ext x_advance]
+    set ya   [dict get $ext y_advance]
+    set asc  [dict get $ext ascent]
+    set desc [dict get $ext descent]
+    set lh   [dict get $ext line_height]
+    set tx   30
+    set bly  [expr {$ty + $asc}]
+
+    # Bounding Box
+    $ctx rect [expr {$tx+$xb}] [expr {$bly+$yb}] $tw $th \
+        -fill {0.85 0.92 1.0 0.8} -stroke {0.45 0.6 0.88} -width 1.2
+    # line_height Box
+    $ctx rect $tx [expr {$bly-$asc}] $xa $lh \
+        -stroke {0.6 0.6 0.6 0.4} -width 0.8
+    # Ascent (blau)
+    $ctx line [expr {$tx-8}] [expr {$bly-$asc}] \
+              [expr {$tx+$xa+10}] [expr {$bly-$asc}] \
+        -color {0.2 0.5 0.9 0.75} -width 1 -dash {5 3}
+    # Baseline (rot)
+    $ctx line [expr {$tx-8}] $bly \
+              [expr {$tx+$xa+10}] $bly \
+        -color {0.85 0.2 0.2} -width 1.8 -dash {4 3}
+    # Descent (gruen)
+    $ctx line [expr {$tx-8}] [expr {$bly+$desc}] \
+              [expr {$tx+$xa+10}] [expr {$bly+$desc}] \
+        -color {0.15 0.65 0.3 0.75} -width 1 -dash {5 3}
+    # x_advance Pfeil
+    set ay [expr {$bly+$desc+10}]
+    $ctx line $tx $ay [expr {$tx+$xa}] $ay \
+        -color {0.6 0.3 0.75} -width 1.5
+    $ctx circle [expr {$tx+$xa}] $ay 4 -fill {0.6 0.3 0.75}
+    # Text
+    $ctx text $tx $bly "Cairo" -font "Sans Bold 36" -color {0.08 0.08 0.3}
+
+    # Legende rechts — rx/ry als int damit incr funktioniert
+    set rx [expr {int($tx + $xa + 22)}]
+    set ry [expr {int($bly - $asc)}]
+    foreach {lbl cr cg cb} [list \
+        [format "ascent      = %5.1f" $asc]  0.2  0.5  0.9  \
+        [format "baseline    y=%5.0f" $bly]  0.85 0.2  0.2  \
+        [format "descent     = %5.1f" $desc] 0.15 0.65 0.3  \
+        [format "width       = %5.1f" $tw]   0.3  0.3  0.45 \
+        [format "height      = %5.1f" $th]   0.3  0.3  0.45 \
+        [format "x_bearing   = %5.1f" $xb]   0.3  0.3  0.45 \
+        [format "x_advance   = %5.1f" $xa]   0.6  0.3  0.75 \
+        [format "y_advance   = %5.1f" $ya]   0.3  0.3  0.45 \
+        [format "line_height = %5.1f" $lh]   0.3  0.3  0.45 ] {
+        $ctx text $rx $ry $lbl \
+            -font "Monospace 9" -color [list $cr $cg $cb] -anchor w
+        incr ry 16
+    }
+}
+
+# PNG
+set d20 [tclmcairo::new 520 420]
+demo_text_extents $d20 520 420
+$d20 save $f20png
+$d20 destroy
+puts "  -> $f20png"
+
+# PDF (Vektor — gleicher Code!)
+set d20p [tclmcairo::new 520 420 -mode pdf -file $f20pdf]
+demo_text_extents $d20p 520 420
+$d20p finish
+$d20p destroy
+puts "  -> $f20pdf"
+
 puts "\nAll demos complete."
 puts "Output files in directory: $outdir"

@@ -25,7 +25,7 @@ RANLIB_STUB = ranlib
 SHLIB_LD    = @SHLIB_LD@
 SHLIB_LD_LIBS = @SHLIB_LD_LIBS@
 SHLIB_SUFFIX = @SHLIB_SUFFIX@
-TCL_BIN_DIR = /usr/lib/tcl8.6
+TCL_BIN_DIR = /usr/lib/x86_64-linux-gnu/tcl8.6
 TCL_SRC_DIR = /usr/include/tcl8.6/tcl-private
 TCL_VERSION = 8.6
 # TCLSH defaults to the tclsh from the configured Tcl installation.
@@ -46,16 +46,16 @@ mandir      = ${datarootdir}/man
 
 PACKAGE_DIR = $(DESTDIR)$(libdir)/$(PKG_DIR)
 
-PKG_CFLAGS  =  -DHAVE_LIBJPEG  -std=c11 -Wall -Wextra
+PKG_CFLAGS  =   -std=c11 -Wall -Wextra
 
-INCLUDES    =  -I/usr/include/cairo -I/usr/include/freetype2 -I/usr/include/libpng16 -I/usr/include/pixman-1 -I"/usr/include/tcl8.6"
+INCLUDES    =  -I/usr/include/cairo -I/usr/include/libpng16 -I/usr/include/freetype2 -I/usr/include/pixman-1 -I"/usr/include/tcl8.6"
 DEFINES     = -DPACKAGE_NAME=\"tclmcairo\" -DPACKAGE_TARNAME=\"tclmcairo\" -DPACKAGE_VERSION=\"0.3.3\" -DPACKAGE_STRING=\"tclmcairo\ 0.3.3\" -DPACKAGE_BUGREPORT=\"\" -DPACKAGE_URL=\"\" -DBUILD_tclmcairo=/\*\*/ -DHAVE_STDIO_H=1 -DHAVE_STDLIB_H=1 -DHAVE_STRING_H=1 -DHAVE_INTTYPES_H=1 -DHAVE_STDINT_H=1 -DHAVE_STRINGS_H=1 -DHAVE_SYS_STAT_H=1 -DHAVE_SYS_TYPES_H=1 -DHAVE_UNISTD_H=1 -DSTDC_HEADERS=1 -DTcl_Size=int -DUSE_TCL_STUBS=1 -DUSE_TCLOO_STUBS=1 -DTCL_MAJOR_VERSION=8 -DTK_MAJOR_VERSION=8 -DUSE_TCL_STUBS
 
 # CFLAGS direkt — keine TEA-internen @VARS@ die nicht substituiert werden
 CFLAGS      = -shared -fPIC -O2 \
               $(INCLUDES) $(DEFINES) $(PKG_CFLAGS)
 
-LDFLAGS     =  -lcairo -ljpeg -lm -L/usr/lib/x86_64-linux-gnu -ltclstub8.6 -lm
+LDFLAGS     =  -lcairo -lm -L/usr/lib/x86_64-linux-gnu -ltclstub8.6 -lm
 
 # ================================================================
 # Ziele

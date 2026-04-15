@@ -3,9 +3,9 @@
 A lightweight Cairo binding for Tcl — no Tk required.
 Runs in `tclsh`. Outputs PNG, PDF, SVG, PS, EPS.
 
-**Version:** 0.3.3 · **License:** BSD · **Tcl:** 8.6 / 9.0  
+**Version:** 0.3.4 · **License:** BSD · **Tcl:** 8.6 / 9.0  
 **Platform:** Linux, Windows (MSYS2 MINGW64, BAWT 3.2), macOS  
-**Tests:** 187/187 (Linux tclmcairo) · 67/67 (Linux canvas2cairo) · 170/170 (Windows)
+**Tests:** 193/193 (Linux tclmcairo) · 67/67 (Linux canvas2cairo) · 193/193 (Windows)
 
 ---
 
@@ -15,6 +15,8 @@ Runs in `tclsh`. Outputs PNG, PDF, SVG, PS, EPS.
 |---------|----------|-------------|
 | `tclmcairo` | Tcl 8.6+ | Core Cairo binding — headless, no Tk needed |
 | `canvas2cairo` | tclmcairo + Tk | Export Tk Canvas to SVG/PDF/PS/EPS |
+| `shape_renderer` | tclmcairo | Network diagram shapes (router, server, ...) |
+| `svg2cairo` | tclmcairo + tDOM | SVG renderer via tDOM (CSS, text, gradients) |
 
 ---
 
@@ -39,22 +41,32 @@ $ctx save "output.pdf"   ;# same drawing, true vectors
 $ctx destroy
 ```
 
+### SVG rendering
+
+```tcl
+# nanosvg (eingebettet, keine Abhängigkeiten)
+package require tclmcairo
+set ctx [tclmcairo::new 400 300]
+$ctx svg_file "logo.svg" 0 0 -width 400 -height 300
+$ctx save "output.png"
+$ctx destroy
+
+# lunasvg (optional, volle CSS + Text-Unterstützung)
+$ctx svg_file_luna "diagram.svg" 0 0 -width 400 -height 300
+
+# svg2cairo (tDOM-basiert, CSS <style>, <text>, <tspan>)
+package require svg2cairo
+svg2cairo::render $ctx "diagram.svg" -scale 2.0
+```
+
 ### canvas2cairo — Export Tk Canvas
 
 ```tcl
 package require canvas2cairo
 
-# Export any Tk canvas — format by file extension
 canvas2cairo::export .c output.svg    ;# SVG vector
 canvas2cairo::export .c output.pdf    ;# PDF vector
 canvas2cairo::export .c output.ps     ;# PostScript
-
-# Or render into an existing tclmcairo context
-set ctx [tclmcairo::new 595 842 -mode pdf -file "report.pdf"]
-$ctx text 297 30 "Report Title" -font {Sans 18 bold} \
-    -color {0 0 0} -anchor center
-canvas2cairo::render .mycanvas $ctx
-$ctx finish; $ctx destroy
 ```
 
 ---
@@ -74,88 +86,104 @@ $ctx finish; $ctx destroy
 `set_fill_rule`, `set_source_rgb`, `set_source_rgba`
 
 **Text:** font parsing (`{Sans Bold Italic 14}`), anchors, color, alpha,
-`text_path` / `-outline` for gradient fill + stroke, `font_measure`,
-`font_options` (antialias, hint_style, hint_metrics)
+`text_path` / `-outline`, `font_measure`, `font_options`,
+`select_font_face`, `text_extents` (9-key dict)
 
 **Transforms:** `-translate`, `-scale`, `-rotate`, `-matrix`, `-get`, `-reset`
 
 **Gradients:** linear + radial, `-fillname`, `gradient_extend`, `gradient_filter`
 
-**Source/Paint:** `set_source -color/-gradient`, `paint ?alpha?`
+**Images:** PNG + JPEG load · `image_data` · `image_size` (w/h without drawing)
+· JPEG MIME embedding in PDF/SVG
 
-**Compositing:** `operator` — 29 Porter-Duff + CSS blend modes,
+**SVG:** `svg_file`, `svg_data` (nanosvg, eingebettet) ·
+`svg_file_luna`, `svg_data_luna`, `svg_size_luna` (lunasvg, optional)
+
+**Output:** PNG, PDF, SVG, PS, EPS · `save -chan` · `topng` · `todata` (ARGB32)
+· `surface_copy` · multi-page via `newpage`/`finish`
+
+**Compositing:** `operator` (29 Porter-Duff + CSS blend modes),
 `push`/`pop`, `clip_rect`, `clip_path`, `clip_reset`, `blit`
 
 **Coordinates:** `user_to_device`, `device_to_user`, `recording_bbox`, `path_get`
 
-**Output:** PNG, PDF, SVG, PS, EPS · `topng` (bytes) · `todata` (ARGB32 for Tk photo)
-· `surface_copy` · multi-page via `newpage`/`finish`
+### svg2cairo (Tcl module)
 
-**Images:** PNG + JPEG load · `image_data` (from bytes) · JPEG MIME embedding in PDF/SVG
+tDOM-based SVG renderer — handles CSS `<style>` (tag, .class, #id),
+`<text>`, `<tspan>`, `<textPath>` fallback, 50 W3C color names,
+DOCTYPE strip. Requires `package require tdom`.
+
+```tcl
+package require svg2cairo
+
+svg2cairo::render $ctx "file.svg" ?-scale 2.0?
+svg2cairo::render_data $ctx $svgstring
+lassign [svg2cairo::size "file.svg"] w h
+svg2cairo::has_text "file.svg"   ;# -> 1 if <text> elements present
+```
 
 ### canvas2cairo (Tk addon)
 
-Exports any Tk Canvas to all Cairo output formats — all vector, no rasterization.
+Exports any Tk Canvas to all Cairo output formats.
 
-**Supported items:** `rectangle`, `oval`, `line`, `polygon`, `text`, `arc`
-(pieslice / chord / arc), `image` (photo embedded as pixel data)
+**Supported items:** `rectangle`, `oval`, `line`, `polygon`, `text`, `arc`,
+`image` (photo)
 
 **Features:** `-dash`, `-dashoffset`, `-capstyle`, `-joinstyle`, `-smooth`,
-`-arrow`, text `-angle` rotation, `-state hidden` items skipped,
-works without visible window (uses `[$canvas cget -width/height]`)
+`-arrow`, text `-angle`, `-state hidden` items skipped,
+`export -scale` (HiDPI), `export -viewport` (region export)
 
 ---
 
 ## Build
 
-### Linux / macOS
+### Linux — Standard
 
 ```bash
 autoconf && ./configure --with-tcl=/usr/lib/tcl8.6
-make && make test
-make demo      # generate demo PNGs
-make samples   # generate examples/SAMPLES.md
+make && sudo make install
+make test
 ```
 
-For a custom Tcl installation (e.g. self-compiled):
+### Linux — mit lunasvg
 
 ```bash
-autoconf && ./configure --with-tcl=/path/to/tcl/lib
-make && make test
+# lunasvg einmalig bauen:
+cd ~/lunasvg && cmake -B build_shared -DBUILD_SHARED_LIBS=ON . && cmake --build build_shared
+
+# tclmcairo mit lunasvg:
+autoconf && ./configure --with-tcl=/usr/lib/tcl8.6
+make clean && make && sudo make install
+bash buildlt.sh
 ```
 
-Note: `TEA_PRIVATE_TCL_HEADERS` has been removed — only the installed
-headers are needed. No Tcl source tree required.
+Reihenfolge beachten: `sudo make install` vor `buildlt.sh`.
+Details: `INSTALL.md`, `nogit/lunasvg-build.md`.
 
-### Windows
-
-```bash
-# MSYS2
-make -f Makefile.win TARGET=mingw64
-make -f Makefile.win TARGET=mingw64 test
-```
+### Windows (BAWT + MSYS2)
 
 ```bat
-rem BAWT (CMD)
+REM ohne lunasvg:
 build-win.bat 86
+
+REM mit lunasvg:
+set LUNASVG_DIR=C:\msys64\home\greg\src\lunasvg
+build-win.bat 86
+
+xcopy /e /i /y dist\tclmcairo0.3.4 C:\Tcl\lib\tclmcairo0.3.4
+test-win.bat 86
 ```
 
-See `INSTALL.md` for installation instructions.
-
-After `make install` all files land in one directory:
-```
-/usr/lib/tcltk/tclmcairo0.3.3/   libtclmcairo.so  pkgIndex.tcl
-                                tclmcairo-0.3.3.tm  canvas2cairo-0.1.tm
-```
+See `INSTALL.md` for full details.
 
 ---
 
 ## Demos
 
 ```bash
-make demo   # -> demos/*.png
-wish demos/demo-coordinates.tcl   # interactive coordinates explorer
-wish demos/demo-canvas2cairo.tcl  # canvas2cairo showcase
+make demo   # -> demos/*.png, demos/*.pdf, demos/*.svg
+wish demos/demo-coordinates.tcl   # interactive
+wish demos/demo-canvas2cairo.tcl
 ```
 
 | # | Content |
@@ -179,23 +207,11 @@ wish demos/demo-canvas2cairo.tcl  # canvas2cairo showcase
 | 17 | gradient_extend, gradient_filter, paint, set_source |
 | 18 | font_options, path_get, surface_copy |
 | 19 | save -chan: PNG/PDF/SVG to open channel |
+| 20 | text_extents + select_font_face |
+| 21 | svg_file + svg_data (nanosvg) |
 
 **`demos/nodeeditor.tcl`** — full node editor application:
-- Drag-and-drop nodes, port-to-port connections
-- Orthogonal (Manhattan) routing
-- Undo/Redo, Save/Load (.dia)
-- Export full diagram or region → SVG, PDF, PS, EPS, PNG
-
----
-
-## Examples
-
-`examples/` — 15 ports of the official [Cairo C samples](https://cairographics.org/samples/)
-(public domain, Øyvind Kolås). See `examples/SAMPLES.md` for images + code.
-
-```bash
-cd examples && TCLMCAIRO_LIBDIR=.. tclsh8.6 run_all.tcl
-```
+drag-and-drop nodes, port connections, undo/redo, save/load, export.
 
 ---
 
@@ -207,8 +223,9 @@ cd examples && TCLMCAIRO_LIBDIR=.. tclsh8.6 run_all.tcl
 | `docs/manual.md` | Manual with examples |
 | `docs/canvas2cairo.md` | canvas2cairo reference |
 | `examples/SAMPLES.md` | Cairo samples with images + code |
-| `INSTALL.md` | Installation instructions |
+| `INSTALL.md` | Installation (Linux + Windows + lunasvg) |
 | `CHANGELOG.md` | Version history |
+| `nogit/lunasvg-build.md` | lunasvg build instructions |
 
 ---
 
@@ -222,9 +239,7 @@ cd examples && TCLMCAIRO_LIBDIR=.. tclsh8.6 run_all.tcl
 
 tclmcairo itself: **BSD 2-Clause** — see `LICENSE`.
 
-Dependencies:
-- **Cairo** — LGPL 2.1 or MPL 1.1 (dynamically linked — no license infection)
+- **Cairo** — LGPL 2.1 or MPL 1.1 (dynamically linked)
 - **libjpeg** — IJG License (permissive, optional)
-
-Distributing tclmcairo binaries requires libcairo to be available as a shared
-library (`.so` / `.dll`) — this satisfies the LGPL requirement.
+- **nanosvg** — zlib/libpng License (embedded)
+- **lunasvg** — MIT (optional, separate build)

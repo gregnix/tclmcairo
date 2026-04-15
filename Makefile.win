@@ -24,7 +24,7 @@
 #   make -f Makefile.win clean
 
 PACKAGE_NAME    = tclmcairo
-PACKAGE_VERSION = 0.3.3
+PACKAGE_VERSION = 0.3.4
 TARGET          ?= mingw-ucrt64
 TCLSH           ?= tclsh
 
@@ -134,8 +134,10 @@ DEFINES     = -DUSE_TCL_STUBS \
 CFLAGS      = -shared -O2 -std=c11 \
               -I$(TCL_INC) \
               -I$(CAIRO_INC) \
+              -Isrc \
               $(JPEG_INC) \
               $(DEFINES)
+# -Isrc: nanosvg.h + nanosvgrast.h (eingebettet ab 0.3.4)
 
 LDFLAGS     = $(TCL_STUB) $(CAIRO_LIB) $(JPEG_LIB) -lm
 

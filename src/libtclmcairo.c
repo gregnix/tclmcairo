@@ -43,6 +43,8 @@
  *
  *   tclmcairo font_measure      handle string font -> {width height ascent descent}
  *   tclmcairo select_font_face  handle family ?-slant s? ?-weight w? ?-size n?
+ *   tclmcairo svg_file          handle filename x y ?-width w? ?-height h? ?-scale s?
+ *   tclmcairo svg_data          handle svgstring x y ?-width w? ?-height h? ?-scale s?
  *   tclmcairo transform handle -translate x y | -scale sx sy | -rotate deg | -reset
  *
  *   tclmcairo gradient_linear handle name x1 y1 x2 y2 stops
@@ -76,6 +78,31 @@
 #include <stdio.h>
 #include <math.h>
 #include <ctype.h>
+
+/* lunasvg C++ wrapper — forward declarations (optional, compile-time) */
+#ifdef HAVE_LUNASVG
+extern int LunaSvgFileCmd(cairo_t* cr, Tcl_Interp* interp, int objc, Tcl_Obj* const objv[]);
+extern int LunaSvgDataCmd(cairo_t* cr, Tcl_Interp* interp, int objc, Tcl_Obj* const objv[]);
+extern int LunaSvgSizeCmd(Tcl_Interp* interp, int objc, Tcl_Obj* const objv[]);
+#endif
+
+/* PACKAGE_VERSION is defined by autoconf as a quoted string "x.y.z"     */
+/* On Windows (build-win.bat) it must be passed as -DPACKAGE_VERSION=\"x.y.z\" */
+#ifndef PACKAGE_VERSION
+#  define PACKAGE_VERSION "0.0.0"
+#endif
+
+/* nanosvg — SVG parser + rasterizer (zlib/libpng License)             */
+/* Copyright (c) 2013-14 Mikko Mononen memon@inside.org                 */
+/* Via tksvg / Tk 9 core — https://github.com/memononen/nanosvg         */
+#define NANOSVG_malloc  ckalloc
+#define NANOSVG_realloc ckrealloc
+#define NANOSVG_free    ckfree
+#define NANOSVG_ALL_COLOR_KEYWORDS
+#define NANOSVG_IMPLEMENTATION
+#include "nanosvg.h"
+#define NANOSVGRAST_IMPLEMENTATION
+#include "nanosvgrast.h"
 
 /* Optional JPEG support via libjpeg */
 #ifdef HAVE_LIBJPEG
@@ -1363,6 +1390,263 @@ static cairo_surface_t *load_jpeg(const char *filename,
     return surf;
 }
 #endif /* HAVE_LIBJPEG */
+
+
+/* ================================================================== */
+/* svg_file id filename x y ?-width w? ?-height h? ?-scale s?          */
+/* Render SVG file onto current context via nanosvg                     */
+/* ================================================================== */
+static int CairoSvgFileCmd(ClientData cd, Tcl_Interp *interp,
+    int objc, Tcl_Obj *const objv[])
+{
+    (void)cd;
+    if (objc < 6) {
+        Tcl_WrongNumArgs(interp, 2, objv,
+            "id filename x y ?-width w? ?-height h? ?-scale s?");
+        return TCL_ERROR;
+    }
+    int id; GET_INT(interp, objv[2], id);
+    CairoCtx *c = ctx_find(id);
+    if (!c) { Tcl_SetResult(interp, "invalid id", TCL_STATIC); return TCL_ERROR; }
+
+    const char *fname = Tcl_GetString(objv[3]);
+    double dx, dy;
+    GET_DOUBLE(interp, objv[4], dx);
+    GET_DOUBLE(interp, objv[5], dy);
+
+    double req_w = -1, req_h = -1, scale = -1;
+    for (int i = 6; i+1 < objc; i += 2) {
+        const char *opt = Tcl_GetString(objv[i]);
+        if      (!strcmp(opt, "-width"))  { GET_DOUBLE(interp, objv[i+1], req_w); }
+        else if (!strcmp(opt, "-height")) { GET_DOUBLE(interp, objv[i+1], req_h); }
+        else if (!strcmp(opt, "-scale"))  { GET_DOUBLE(interp, objv[i+1], scale); }
+    }
+
+    NSVGimage *svg = nsvgParseFromFile(fname, "px", 96.0f);
+    if (!svg) {
+        Tcl_SetResult(interp, "svg_file: cannot parse SVG", TCL_STATIC);
+        return TCL_ERROR;
+    }
+
+    float sw = svg->width, sh = svg->height;
+    if (sw <= 0) sw = 100;
+    if (sh <= 0) sh = 100;
+
+    /* Determine scale factor */
+    float sx = 1.0f, sy = 1.0f;
+    if (scale > 0) {
+        sx = sy = (float)scale;
+    } else if (req_w > 0 && req_h > 0) {
+        sx = (float)req_w / sw;
+        sy = (float)req_h / sh;
+    } else if (req_w > 0) {
+        sx = sy = (float)req_w / sw;
+    } else if (req_h > 0) {
+        sx = sy = (float)req_h / sh;
+    }
+
+    int rw = (int)(sw * sx + 0.5f);
+    int rh = (int)(sh * sy + 0.5f);
+    if (rw < 1) rw = 1;
+    if (rh < 1) rh = 1;
+
+    /* Rasterize via nanosvg */
+    NSVGrasterizer *rast = nsvgCreateRasterizer();
+    if (!rast) {
+        nsvgDelete(svg);
+        Tcl_SetResult(interp, "svg_file: cannot create rasterizer", TCL_STATIC);
+        return TCL_ERROR;
+    }
+
+    unsigned char *pixels = (unsigned char *)ckalloc(rw * rh * 4);
+    nsvgRasterize(rast, svg, 0, 0, sx, pixels, rw, rh, rw * 4);
+    nsvgDeleteRasterizer(rast);
+    nsvgDelete(svg);
+
+    /* Create Cairo image surface from RGBA pixels */
+    /* nanosvg gives RGBA, Cairo wants ARGB premultiplied */
+    cairo_surface_t *surf = cairo_image_surface_create(
+        CAIRO_FORMAT_ARGB32, rw, rh);
+    unsigned char *cdata = cairo_image_surface_get_data(surf);
+    int stride = cairo_image_surface_get_stride(surf);
+
+    for (int row = 0; row < rh; row++) {
+        unsigned char *src = pixels + row * rw * 4;
+        unsigned char *dst = cdata + row * stride;
+        for (int col = 0; col < rw; col++) {
+            unsigned char r = src[0], g = src[1],
+                          b = src[2], a = src[3];
+            /* Premultiply alpha */
+            dst[0] = (unsigned char)((b * a) / 255);  /* B */
+            dst[1] = (unsigned char)((g * a) / 255);  /* G */
+            dst[2] = (unsigned char)((r * a) / 255);  /* R */
+            dst[3] = a;                                /* A */
+            src += 4; dst += 4;
+        }
+    }
+    cairo_surface_mark_dirty(surf);
+    ckfree((char *)pixels);
+
+    /* Paint onto context */
+    cairo_save(c->cr);
+    cairo_set_source_surface(c->cr, surf, dx, dy);
+    cairo_paint(c->cr);
+    cairo_restore(c->cr);
+    cairo_surface_destroy(surf);
+
+    return TCL_OK;
+}
+
+/* ================================================================== */
+/* svg_data id svgstring x y ?-width w? ?-height h? ?-scale s?         */
+/* Render SVG from string onto current context                          */
+/* ================================================================== */
+static int CairoSvgDataCmd(ClientData cd, Tcl_Interp *interp,
+    int objc, Tcl_Obj *const objv[])
+{
+    (void)cd;
+    if (objc < 6) {
+        Tcl_WrongNumArgs(interp, 2, objv,
+            "id svgdata x y ?-width w? ?-height h? ?-scale s?");
+        return TCL_ERROR;
+    }
+    int id; GET_INT(interp, objv[2], id);
+    CairoCtx *c = ctx_find(id);
+    if (!c) { Tcl_SetResult(interp, "invalid id", TCL_STATIC); return TCL_ERROR; }
+
+    /* nsvgParse modifies the string — make a copy */
+    const char *src = Tcl_GetString(objv[3]);
+    char *svgcopy = (char *)ckalloc(strlen(src) + 1);
+    strcpy(svgcopy, src);
+
+    double dx, dy;
+    GET_DOUBLE(interp, objv[4], dx);
+    GET_DOUBLE(interp, objv[5], dy);
+
+    double req_w = -1, req_h = -1, scale = -1;
+    for (int i = 6; i+1 < objc; i += 2) {
+        const char *opt = Tcl_GetString(objv[i]);
+        if      (!strcmp(opt, "-width"))  { GET_DOUBLE(interp, objv[i+1], req_w); }
+        else if (!strcmp(opt, "-height")) { GET_DOUBLE(interp, objv[i+1], req_h); }
+        else if (!strcmp(opt, "-scale"))  { GET_DOUBLE(interp, objv[i+1], scale); }
+    }
+
+    NSVGimage *svg = nsvgParse(svgcopy, "px", 96.0f);
+    ckfree(svgcopy);
+    if (!svg) {
+        Tcl_SetResult(interp, "svg_data: cannot parse SVG", TCL_STATIC);
+        return TCL_ERROR;
+    }
+
+    float sw = svg->width, sh = svg->height;
+    if (sw <= 0) sw = 100;
+    if (sh <= 0) sh = 100;
+
+    float sx = 1.0f, sy = 1.0f;
+    if (scale > 0) {
+        sx = sy = (float)scale;
+    } else if (req_w > 0 && req_h > 0) {
+        sx = (float)req_w / sw; sy = (float)req_h / sh;
+    } else if (req_w > 0) {
+        sx = sy = (float)req_w / sw;
+    } else if (req_h > 0) {
+        sx = sy = (float)req_h / sh;
+    }
+
+    int rw = (int)(sw * sx + 0.5f);
+    int rh = (int)(sh * sy + 0.5f);
+    if (rw < 1) rw = 1;
+    if (rh < 1) rh = 1;
+
+    NSVGrasterizer *rast = nsvgCreateRasterizer();
+    if (!rast) {
+        nsvgDelete(svg);
+        Tcl_SetResult(interp, "svg_data: cannot create rasterizer", TCL_STATIC);
+        return TCL_ERROR;
+    }
+
+    unsigned char *pixels = (unsigned char *)ckalloc(rw * rh * 4);
+    nsvgRasterize(rast, svg, 0, 0, sx, pixels, rw, rh, rw * 4);
+    nsvgDeleteRasterizer(rast);
+    nsvgDelete(svg);
+
+    cairo_surface_t *surf = cairo_image_surface_create(
+        CAIRO_FORMAT_ARGB32, rw, rh);
+    unsigned char *cdata = cairo_image_surface_get_data(surf);
+    int stride = cairo_image_surface_get_stride(surf);
+
+    for (int row = 0; row < rh; row++) {
+        unsigned char *src2 = pixels + row * rw * 4;
+        unsigned char *dst  = cdata  + row * stride;
+        for (int col = 0; col < rw; col++) {
+            unsigned char r = src2[0], g = src2[1],
+                          b = src2[2], a = src2[3];
+            dst[0] = (unsigned char)((b * a) / 255);
+            dst[1] = (unsigned char)((g * a) / 255);
+            dst[2] = (unsigned char)((r * a) / 255);
+            dst[3] = a;
+            src2 += 4; dst += 4;
+        }
+    }
+    cairo_surface_mark_dirty(surf);
+    ckfree((char *)pixels);
+
+    cairo_save(c->cr);
+    cairo_set_source_surface(c->cr, surf, dx, dy);
+    cairo_paint(c->cr);
+    cairo_restore(c->cr);
+    cairo_surface_destroy(surf);
+
+    return TCL_OK;
+}
+
+/* ================================================================== */
+/* svg_file_luna id filename x y ?opts?  — lunasvg full SVG renderer  */
+/* svg_data_luna id svgdata  x y ?opts?  — lunasvg from string        */
+/* svg_size_luna id filename             — lunasvg SVG dimensions     */
+/* ================================================================== */
+#ifdef HAVE_LUNASVG
+static int CairoSvgFileLunaCmd(ClientData cd, Tcl_Interp* interp,
+    int objc, Tcl_Obj* const objv[])
+{
+    (void)cd;
+    if (objc < 6) {
+        Tcl_WrongNumArgs(interp, 2, objv, "id filename x y ?-width w? ?-height h? ?-scale s?");
+        return TCL_ERROR;
+    }
+    int id; GET_INT(interp, objv[2], id);
+    CairoCtx *c = ctx_find(id);
+    if (!c) { Tcl_SetResult(interp, "invalid id", TCL_STATIC); return TCL_ERROR; }
+    /* Pass objv+3 (skip "svg_file_luna" and id) */
+    return LunaSvgFileCmd(c->cr, interp, objc - 3, objv + 3);
+}
+
+static int CairoSvgDataLunaCmd(ClientData cd, Tcl_Interp* interp,
+    int objc, Tcl_Obj* const objv[])
+{
+    (void)cd;
+    if (objc < 6) {
+        Tcl_WrongNumArgs(interp, 2, objv, "id svgdata x y ?-width w? ?-height h? ?-scale s?");
+        return TCL_ERROR;
+    }
+    int id; GET_INT(interp, objv[2], id);
+    CairoCtx *c = ctx_find(id);
+    if (!c) { Tcl_SetResult(interp, "invalid id", TCL_STATIC); return TCL_ERROR; }
+    return LunaSvgDataCmd(c->cr, interp, objc - 3, objv + 3);
+}
+
+static int CairoSvgSizeLunaCmd(ClientData cd, Tcl_Interp* interp,
+    int objc, Tcl_Obj* const objv[])
+{
+    (void)cd;
+    if (objc < 4) {
+        Tcl_WrongNumArgs(interp, 2, objv, "id filename");
+        return TCL_ERROR;
+    }
+    /* id not needed for size — just pass filename */
+    return LunaSvgSizeCmd(interp, objc - 3, objv + 3);
+}
+#endif /* HAVE_LUNASVG */
 
 /* ================================================================== */
 /* tclmcairo image_size id filename -> {width height}                  */
@@ -2895,7 +3179,7 @@ static int TkmCairoCmd(ClientData cd, Tcl_Interp *interp,
 {
     if (objc < 2) {
         Tcl_WrongNumArgs(interp, 1, objv,
-            "create|destroy|clear|save|size|todata|newpage|finish|image_size|select_font_face|"
+            "create|destroy|clear|save|size|todata|newpage|finish|image_size|select_font_face|svg_file|svg_data|svg_file_luna|svg_data_luna|svg_size_luna|"
             "push|pop|clip_rect|clip_path|clip_reset|"
             "image|rect|line|circle|ellipse|arc|poly|path|text|text_path|"
             "font_measure|transform|gradient_linear|gradient_radial ...");
@@ -2922,6 +3206,13 @@ static int TkmCairoCmd(ClientData cd, Tcl_Interp *interp,
     else if (!strcmp(sub,"clip_reset"))       return CairoClipResetCmd(cd,interp,objc,objv);
     else if (!strcmp(sub,"image"))            return CairoImageCmd(cd,interp,objc,objv);
     else if (!strcmp(sub,"image_size"))       return CairoImageSizeCmd(cd,interp,objc,objv);
+    else if (!strcmp(sub,"svg_file"))         return CairoSvgFileCmd(cd,interp,objc,objv);
+    else if (!strcmp(sub,"svg_data"))         return CairoSvgDataCmd(cd,interp,objc,objv);
+#ifdef HAVE_LUNASVG
+    else if (!strcmp(sub,"svg_file_luna"))    return CairoSvgFileLunaCmd(cd,interp,objc,objv);
+    else if (!strcmp(sub,"svg_data_luna"))    return CairoSvgDataLunaCmd(cd,interp,objc,objv);
+    else if (!strcmp(sub,"svg_size_luna"))    return CairoSvgSizeLunaCmd(cd,interp,objc,objv);
+#endif
     else if (!strcmp(sub,"blit"))             return CairoBlitCmd(cd,interp,objc,objv);
     else if (!strcmp(sub,"rect"))             return CairoRectCmd(cd,interp,objc,objv);
     else if (!strcmp(sub,"line"))             return CairoLineCmd(cd,interp,objc,objv);
@@ -3071,6 +3362,6 @@ int Tclmcairo_Init(Tcl_Interp *interp)
     Tcl_CreateObjCommand(interp, "tclmcairo", TkmCairoCmd, NULL, NULL);
     /* Register cleanup callback — frees all contexts on interp deletion */
     Tcl_CallWhenDeleted(interp, TclmcairoInterpCleanup, NULL);
-    Tcl_PkgProvide(interp, "tclmcairo", "0.3.3");
+    Tcl_PkgProvide(interp, "tclmcairo", PACKAGE_VERSION);
     return TCL_OK;
 }

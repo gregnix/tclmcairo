@@ -1,6 +1,6 @@
 # pkgIndex.tcl -- generated from pkgIndex.tcl.in
 # Files in $dir: libtclmcairo.so/.dll, tclmcairo-@PACKAGE_VERSION@.tm,
-#                canvas2cairo-0.1.tm, shape_renderer-0.1.tm
+#                canvas2cairo-0.1.tm, shape_renderer-0.1.tm, svg2cairo-0.1.tm
 
 if {![package vsatisfies [package provide Tcl] 8.6-]} { return }
 
@@ -9,6 +9,11 @@ package ifneeded @PACKAGE_NAME@ @PACKAGE_VERSION@ [list apply {{dir ver} {
     if {$::tcl_platform(platform) eq "windows"} {
         # Pre-load Cairo dependencies with absolute paths
         # so Windows finds them before loading tclmcairo.dll
+        # DLL-Verzeichnis zum PATH hinzufügen damit Windows
+        # Abhängigkeiten (liblunasvg.dll etc.) findet
+        set _oldpath $::env(PATH)
+        set ::env(PATH) "$dir;$_oldpath"
+
         foreach dep {
             libbz2-1.dll
             zlib1.dll
@@ -26,11 +31,18 @@ package ifneeded @PACKAGE_NAME@ @PACKAGE_VERSION@ [list apply {{dir ver} {
             libfontconfig-1.dll
             libpixman-1-0.dll
             libcairo-2.dll
+            libgcc_s_seh-1.dll
+            libwinpthread-1.dll
+            libstdc++-6.dll
+            libplutovg.dll
+            liblunasvg.dll
+            lunasvg.dll
         } {
             set p [file join $dir $dep]
             if {[file exists $p]} { catch {load $p} }
         }
         load [file join $dir tclmcairo.dll]
+        set ::env(PATH) $_oldpath
     } else {
         load [file join $dir libtclmcairo.so]
     }
@@ -42,3 +54,6 @@ package ifneeded canvas2cairo 0.1 \
 
 package ifneeded shape_renderer 0.1 \
     [list source [file join $dir shape_renderer-0.1.tm]]
+
+package ifneeded svg2cairo 0.1 \
+    [list source [file join $dir svg2cairo-0.1.tm]]

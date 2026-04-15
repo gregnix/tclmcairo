@@ -44,7 +44,7 @@
 #
 #   $ctx destroy
 
-package provide tclmcairo 0.3.3
+package provide tclmcairo 0.3.4
 
 namespace eval ::tclmcairo {
     variable _libloaded 0
@@ -71,7 +71,7 @@ namespace eval ::tclmcairo {
             [pwd] \
             [file join [pwd] lib] \
         ]
-        # Windows split layout: .tm in lib/tcl8/8.6/ → .dll in lib/tclmcairo0.3.3/
+        # Windows split layout: .tm in lib/tcl8/8.6/ → .dll in lib/tclmcairo0.3.4/
         # Go up 2 levels from tmdir and search for tclmcairo* subdirs
         set _parent2 [file normalize [file join $_tmdir .. ..]]
         foreach _pkgdir [glob -nocomplain -directory $_parent2 tclmcairo*] {
@@ -101,8 +101,13 @@ namespace eval ::tclmcairo {
                 set p [file normalize [file join $d $name]]
                 if {[file isfile $p]} {
                     if {[catch {load $p} err] == 0} {
-                        set _libloaded 1
-                        return
+                            set _libloaded 1
+                            return
+                        } else {
+                        if {[catch {load $p} err] == 0} {
+                            set _libloaded 1
+                            return
+                        }
                     }
                 }
             }
@@ -219,6 +224,11 @@ oo::define tclmcairo::context {
     method image      {filename x y args} { tclmcairo image      $_id $filename $x $y {*}$args }
     method image_size       {filename}          { tclmcairo image_size       $_id $filename }
     method select_font_face {family args}       { tclmcairo select_font_face $_id $family {*}$args }
+    method svg_file  {filename x y args}        { tclmcairo svg_file  $_id $filename $x $y {*}$args }
+    method svg_data      {svgdata  x y args}    { tclmcairo svg_data      $_id $svgdata  $x $y {*}$args }
+    method svg_file_luna {filename x y args}    { tclmcairo svg_file_luna $_id $filename $x $y {*}$args }
+    method svg_data_luna {svgdata  x y args}    { tclmcairo svg_data_luna $_id $svgdata  $x $y {*}$args }
+    method svg_size_luna {filename}             { tclmcairo svg_size_luna $_id $filename }
 
     # -- Blit (context compositing) --
     method blit {src x y args}       { tclmcairo blit  $_id [$src id] $x $y {*}$args }

@@ -1870,5 +1870,98 @@ $d20p finish
 $d20p destroy
 puts "  -> $f20pdf"
 
+
+# ==================================================================
+# Demo 21: svg_file + svg_data (NEU 0.3.4 — nanosvg)
+# ==================================================================
+puts "Demo 21: svg_file + svg_data (nanosvg)..."
+
+set f21png [file join $outdir demo-svg.png]
+set f21pdf [file join $outdir demo-svg.pdf]
+
+# Inline SVG — einfaches Icon
+set svgdata {<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">
+  <circle cx="50" cy="50" r="45" fill="#4488cc" stroke="#224488" stroke-width="3"/>
+  <polygon points="50,20 65,40 80,40 68,55 73,75 50,62 27,75 32,55 20,40 35,40"
+           fill="#ffcc00" stroke="#cc8800" stroke-width="2"/>
+  <circle cx="50" cy="50" r="10" fill="white" opacity="0.5"/>
+</svg>}
+
+proc demo_svg {ctx w h svgdata svgfile} {
+    $ctx clear 0.12 0.12 0.18 1
+
+    # Titel
+    $ctx text [expr {int($w/2)}] 28 "svg_file + svg_data — nanosvg (0.3.4)" \
+        -font "Sans Bold 14" -color {0.9 0.9 1.0} -anchor center
+
+    # --- svg_data: inline SVG ---
+    $ctx text 40 58 "svg_data (inline):" \
+        -font "Sans Bold 11" -color {0.7 0.8 1.0}
+
+    # Klein
+    $ctx svg_data $svgdata 40 70 -width 80 -height 80
+    $ctx text 80 162 "80×80" -font "Sans 9" -color {0.6 0.6 0.8} -anchor center
+
+    # Mittel
+    $ctx svg_data $svgdata 140 70 -width 120 -height 120
+    $ctx text 200 202 "120×120" -font "Sans 9" -color {0.6 0.6 0.8} -anchor center
+
+    # Groß
+    $ctx svg_data $svgdata 280 70 -width 160 -height 160
+    $ctx text 360 242 "160×160" -font "Sans 9" -color {0.6 0.6 0.8} -anchor center
+
+    # Mit Scale
+    $ctx svg_data $svgdata 460 70 -scale 2.0
+    $ctx text 510 242 "scale=2.0" -font "Sans 9" -color {0.6 0.6 0.8} -anchor center
+
+    # --- Separator ---
+    $ctx rect 20 260 [expr {$w-40}] 1 -fill {0.4 0.4 0.6}
+
+    # --- svg_file: aus Datei laden (falls vorhanden) ---
+    $ctx text 40 285 "svg_file (aus Datei):" \
+        -font "Sans Bold 11" -color {0.7 0.8 1.0}
+
+    if {$svgfile ne "" && [file exists $svgfile]} {
+        $ctx svg_file $svgfile 40 300 -width 100 -height 100
+        $ctx text 90 412 [file tail $svgfile] \
+            -font "Sans 9" -color {0.6 0.6 0.8} -anchor center
+    } else {
+        $ctx rect 40 300 100 100 \
+            -stroke {0.4 0.4 0.6} -width 1
+        $ctx text 90 350 "kein SVG" \
+            -font "Sans 10" -color {0.4 0.4 0.6} -anchor center
+        $ctx text 90 365 "in demos/" \
+            -font "Sans 9" -color {0.4 0.4 0.5} -anchor center
+    }
+
+    # Info-Text
+    $ctx text [expr {int($w/2)}] [expr {$h-18}] \
+        "nanosvg — zlib/libpng License — Mikko Mononen" \
+        -font "Sans 9" -color {0.4 0.4 0.6} -anchor center
+}
+
+# SVG-Datei suchen (orb.svg aus tksvg falls vorhanden)
+set svgfile ""
+foreach candidate {
+    demos/orb.svg
+    demos/test.svg
+} {
+    if {[file exists $candidate]} { set svgfile $candidate; break }
+}
+
+# PNG
+set d21 [tclmcairo::new 660 430]
+demo_svg $d21 660 430 $svgdata $svgfile
+$d21 save $f21png
+$d21 destroy
+puts "  -> $f21png"
+
+# PDF
+set d21p [tclmcairo::new 660 430 -mode pdf -file $f21pdf]
+demo_svg $d21p 660 430 $svgdata $svgfile
+$d21p finish
+$d21p destroy
+puts "  -> $f21pdf"
+
 puts "\nAll demos complete."
 puts "Output files in directory: $outdir"

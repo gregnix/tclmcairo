@@ -25,7 +25,14 @@ set H 150
 
 proc mkctx  {}      { return [tclmcairo::new $::W $::H] }
 proc mkvctx {}      { return [tclmcairo::new $::W $::H -mode vector] }
-proc tmpfile {ext}  { return [file join /tmp "tclmcairo_test.[pid].$ext"] }
+proc tmpfile {ext} {
+    set base [expr {
+        [info exists ::env(TEMP)] ? $::env(TEMP) :
+        [info exists ::env(TMP)]  ? $::env(TMP)  :
+        "/tmp"
+    }]
+    return [file join $base "tclmcairo_test.[pid].$ext"]
+}
 proc cleanup {f}    { catch {file delete $f} }
 
 # ================================================================
@@ -1849,7 +1856,7 @@ test lowlevel-1.16 {rel_move_to moves current point} -body {
 # Fix 1: package version consistency
 test robustness-1.0 {package version is 0.3.3} -body {
     package present tclmcairo
-} -result 0.3.3
+} -result 0.3.4
 
 # Fix 5: low-level commands check argument count
 test robustness-1.1 {move_to requires x y} -body {

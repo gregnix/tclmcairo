@@ -188,6 +188,7 @@ typedef struct {
 static CairoCtx *g_ctx[MAX_CTX] = {0};
 static int        g_next_id = 1;
 
+
 static CairoCtx *ctx_find(int id) {
     for (int i = 0; i < MAX_CTX; i++)
         if (g_ctx[i] && g_ctx[i]->id == id) return g_ctx[i];
@@ -1020,6 +1021,61 @@ static int CairoImageDataCmd(ClientData cd, Tcl_Interp *interp,
     return TCL_OK;
 }
 
+
+/* -------------------------------------------------------------- */
+/* toppm -> PPM bytearray (P6 RGB24, viel schneller als PNG)       */
+/* Tk 8.6: image put $ppm -format ppm  funktioniert nativ          */
+/* -------------------------------------------------------------- */
+static int CairoToPpmCmd(ClientData cd, Tcl_Interp *interp,
+    int objc, Tcl_Obj *const objv[])
+{
+    (void)cd;
+    if (objc < 3) {
+        Tcl_WrongNumArgs(interp, 2, objv, "id");
+        return TCL_ERROR;
+    }
+    int id; GET_INT(interp, objv[2], id);
+    CairoCtx *c = ctx_find(id);
+    if (!c) { Tcl_SetResult(interp,"invalid id",TCL_STATIC); return TCL_ERROR; }
+
+    cairo_surface_flush(c->surface);
+    unsigned char *src = cairo_image_surface_get_data(c->surface);
+    int w = c->width;
+    int h = c->height;
+    int stride = cairo_image_surface_get_stride(c->surface);
+
+    /* PPM Header */
+    char hdr[64];
+    int hdrlen = snprintf(hdr, sizeof(hdr), "P6\n%d %d\n255\n", w, h);
+
+    /* RGB24 Daten: ARGB32 (B G R A) → R G B */
+    int pixlen = w * h * 3;
+    unsigned char *buf = (unsigned char*)ckalloc(hdrlen + pixlen);
+    if (!buf) {
+        Tcl_SetResult(interp, "toppm: out of memory", TCL_STATIC);
+        return TCL_ERROR;
+    }
+
+    memcpy(buf, hdr, hdrlen);
+    unsigned char *dst = buf + hdrlen;
+
+    for (int y = 0; y < h; y++) {
+        unsigned char *row = src + y * stride;
+        for (int x = 0; x < w; x++) {
+            /* Cairo ARGB32 little-endian: byte order B G R A */
+            dst[0] = row[2]; /* R */
+            dst[1] = row[1]; /* G */
+            dst[2] = row[0]; /* B */
+            dst += 3;
+            row += 4;
+        }
+    }
+
+    Tcl_SetObjResult(interp, Tcl_NewByteArrayObj(buf, hdrlen + pixlen));
+    ckfree((char*)buf);
+    return TCL_OK;
+}
+
 /* Cairo write callback for channel output */
 static cairo_status_t _cairo_write_to_channel(void *closure,
     const unsigned char *data, unsigned int length)
@@ -1652,6 +1708,354 @@ static int CairoSvgSizeLunaCmd(ClientData cd, Tcl_Interp* interp,
 /* tclmcairo image_size id filename -> {width height}                  */
 /* Returns the pixel dimensions of a PNG or JPEG file without drawing  */
 /* ================================================================== */
+/* ================================================================== */
+/* IMAGE BUFFER POOL                                                   */
+/* image_load  filename  -> image_id                                   */
+/* image_blit  ctx_id image_id x y ?-width w? ?-height h? ?-alpha a?  */
+/* image_free  image_id                                                */
+/*                                                                     */
+/* Hält geladene Bilder als cairo_surface_t im RAM — kein wiederholtes */
+/* Laden von Disk bei Pan/Zoom. Essenziell für tkmcairo imageviewer.   */
+/* ================================================================== */
+
+#define MAX_IMG 64
+
+typedef struct {
+    int              id;
+    cairo_surface_t *surface;
+    int              width;
+    int              height;
+} ImgBuf;
+
+static ImgBuf *g_img[MAX_IMG] = {0};
+static int     g_next_img_id  = 1;
+
+static ImgBuf *img_find(int id) {
+    for (int i = 0; i < MAX_IMG; i++)
+        if (g_img[i] && g_img[i]->id == id) return g_img[i];
+    return NULL;
+}
+static int img_store(ImgBuf *b) {
+    for (int i = 0; i < MAX_IMG; i++)
+        if (!g_img[i]) { g_img[i] = b; return 1; }
+    return 0;
+}
+static void img_remove(int id) {
+    for (int i = 0; i < MAX_IMG; i++)
+        if (g_img[i] && g_img[i]->id == id) { g_img[i] = NULL; return; }
+}
+
+/* Helper: Bild von Disk laden (PNG oder JPEG) */
+static cairo_surface_t *img_load_surface(Tcl_Interp *interp, const char *fname) {
+    cairo_surface_t *surf = NULL;
+#ifdef HAVE_LIBJPEG
+    const char *dot = strrchr(fname, '.');
+    const char *ext = dot ? dot+1 : "";
+    if (!strcasecmp(ext,"jpg") || !strcasecmp(ext,"jpeg")) {
+        surf = load_jpeg(fname, NULL, NULL);
+    }
+#endif
+    if (!surf) {
+        surf = cairo_image_surface_create_from_png(fname);
+    }
+    if (!surf || cairo_surface_status(surf) != CAIRO_STATUS_SUCCESS) {
+        const char *err = surf ?
+            cairo_status_to_string(cairo_surface_status(surf)) :
+            "cannot load image";
+        Tcl_SetObjResult(interp,
+            Tcl_ObjPrintf("image_load failed: %s: %s", fname, err));
+        if (surf) cairo_surface_destroy(surf);
+        return NULL;
+    }
+    return surf;
+}
+
+/* -------------------------------------------------------------- */
+/* image_load filename -> image_id                                 */
+/* -------------------------------------------------------------- */
+static int CairoImageLoadCmd(ClientData cd, Tcl_Interp *interp,
+    int objc, Tcl_Obj *const objv[])
+{
+    (void)cd;
+    if (objc < 4) {
+        Tcl_WrongNumArgs(interp, 2, objv, "ctx_id filename");
+        return TCL_ERROR;
+    }
+    /* objv[2] = ctx_id (ignored, for OO consistency), objv[3] = filename */
+    const char *fname = Tcl_GetString(objv[3]);
+
+    cairo_surface_t *surf = img_load_surface(interp, fname);
+    if (!surf) return TCL_ERROR;
+
+    ImgBuf *b = (ImgBuf*)calloc(1, sizeof(ImgBuf));
+    if (!b) {
+        cairo_surface_destroy(surf);
+        Tcl_SetResult(interp, "image_load: out of memory", TCL_STATIC);
+        return TCL_ERROR;
+    }
+    b->id      = g_next_img_id++;
+    b->surface = surf;
+    b->width   = cairo_image_surface_get_width(surf);
+    b->height  = cairo_image_surface_get_height(surf);
+
+    if (!img_store(b)) {
+        cairo_surface_destroy(surf);
+        free(b);
+        Tcl_SetObjResult(interp,
+            Tcl_ObjPrintf("image_load: image buffer pool full (max %d)", MAX_IMG));
+        return TCL_ERROR;
+    }
+
+    Tcl_SetObjResult(interp, Tcl_NewIntObj(b->id));
+    return TCL_OK;
+}
+
+/* -------------------------------------------------------------- */
+/* image_blit ctx_id image_id x y ?-width w? ?-height h? ?-alpha a? ?-scale sx sy? */
+/* -------------------------------------------------------------- */
+static int CairoImageBlitCmd(ClientData cd, Tcl_Interp *interp,
+    int objc, Tcl_Obj *const objv[])
+{
+    (void)cd;
+    if (objc < 6) {
+        Tcl_WrongNumArgs(interp, 2, objv,
+            "ctx_id image_id x y ?-width w? ?-height h? ?-alpha a?");
+        return TCL_ERROR;
+    }
+    int ctx_id; GET_INT(interp, objv[2], ctx_id);
+    int img_id; GET_INT(interp, objv[3], img_id);
+    double x, y;
+    GET_DOUBLE(interp, objv[4], x);
+    GET_DOUBLE(interp, objv[5], y);
+
+    CairoCtx *c = ctx_find(ctx_id);
+    if (!c) {
+        Tcl_SetResult(interp, "image_blit: invalid ctx_id", TCL_STATIC);
+        return TCL_ERROR;
+    }
+    ImgBuf *b = img_find(img_id);
+    if (!b) {
+        Tcl_SetResult(interp, "image_blit: invalid image_id", TCL_STATIC);
+        return TCL_ERROR;
+    }
+
+    double dest_w = -1, dest_h = -1, alpha = 1.0;
+    for (int i = 6; i+1 < objc; i += 2) {
+        const char *k = Tcl_GetString(objv[i]);
+        if      (!strcmp(k,"-width"))  { GET_DOUBLE(interp,objv[i+1],dest_w); }
+        else if (!strcmp(k,"-height")) { GET_DOUBLE(interp,objv[i+1],dest_h); }
+        else if (!strcmp(k,"-alpha"))  { GET_DOUBLE(interp,objv[i+1],alpha);  }
+    }
+
+    int iw = b->width;
+    int ih = b->height;
+
+    cairo_save(c->cr);
+    cairo_translate(c->cr, x, y);
+
+    if (dest_w > 0 || dest_h > 0) {
+        double sw = (dest_w > 0) ? dest_w / iw : (dest_h / ih);
+        double sh = (dest_h > 0) ? dest_h / ih : sw;
+        if (dest_w > 0 && dest_h > 0) { sw = dest_w/iw; sh = dest_h/ih; }
+        cairo_scale(c->cr, sw, sh);
+    }
+
+    cairo_set_source_surface(c->cr, b->surface, 0, 0);
+
+    if (alpha < 1.0) {
+        cairo_paint_with_alpha(c->cr, alpha);
+    } else {
+        cairo_paint(c->cr);
+    }
+
+    cairo_restore(c->cr);
+    return TCL_OK;
+}
+
+/* -------------------------------------------------------------- */
+/* image_free image_id                                             */
+/* -------------------------------------------------------------- */
+static int CairoImageFreeCmd(ClientData cd, Tcl_Interp *interp,
+    int objc, Tcl_Obj *const objv[])
+{
+    (void)cd;
+    if (objc < 4) {
+        Tcl_WrongNumArgs(interp, 2, objv, "ctx_id image_id");
+        return TCL_ERROR;
+    }
+    int img_id; GET_INT(interp, objv[3], img_id);
+    ImgBuf *b = img_find(img_id);
+    if (!b) {
+        Tcl_SetResult(interp, "image_free: invalid image_id", TCL_STATIC);
+        return TCL_ERROR;
+    }
+    cairo_surface_destroy(b->surface);
+    img_remove(img_id);
+    free(b);
+    return TCL_OK;
+}
+
+
+/* -------------------------------------------------------------- */
+/* image_scale ctx_id src_id dest_w dest_h -> new_img_id           */
+/* Erzeugt eine skalierte Kopie als neuen image_id.                */
+/* Einmal skalieren, dann schnell via image_blit ohne -width/-height */
+/* -------------------------------------------------------------- */
+static int CairoImageScaleCmd(ClientData cd, Tcl_Interp *interp,
+    int objc, Tcl_Obj *const objv[])
+{
+    (void)cd;
+    if (objc < 7) {
+        Tcl_WrongNumArgs(interp, 2, objv, "ctx_id src_id dest_w dest_h");
+        return TCL_ERROR;
+    }
+    int ctx_id; GET_INT(interp, objv[2], ctx_id);
+    int img_id; GET_INT(interp, objv[3], img_id);
+    double dest_w, dest_h;
+    GET_DOUBLE(interp, objv[4], dest_w);
+    GET_DOUBLE(interp, objv[5], dest_h);
+
+    ImgBuf *src = img_find(img_id);
+    if (!src) {
+        Tcl_SetResult(interp, "image_scale: invalid src_id", TCL_STATIC);
+        return TCL_ERROR;
+    }
+
+    int dw = (int)(dest_w + 0.5);
+    int dh = (int)(dest_h + 0.5);
+    if (dw < 1) dw = 1;
+    if (dh < 1) dh = 1;
+
+    /* Ziel-Surface erstellen */
+    cairo_surface_t *dst = cairo_image_surface_create(
+        CAIRO_FORMAT_ARGB32, dw, dh);
+    if (!dst || cairo_surface_status(dst) != CAIRO_STATUS_SUCCESS) {
+        if (dst) cairo_surface_destroy(dst);
+        Tcl_SetResult(interp, "image_scale: surface create failed", TCL_STATIC);
+        return TCL_ERROR;
+    }
+
+    cairo_t *cr = cairo_create(dst);
+    double sx = (double)dw / src->width;
+    double sy = (double)dh / src->height;
+    cairo_scale(cr, sx, sy);
+    cairo_set_source_surface(cr, src->surface, 0, 0);
+    /* Bilinear-Filter für bessere Qualität */
+    cairo_pattern_set_filter(cairo_get_source(cr), CAIRO_FILTER_BILINEAR);
+    cairo_paint(cr);
+    cairo_destroy(cr);
+    cairo_surface_flush(dst);
+
+    ImgBuf *b = (ImgBuf*)calloc(1, sizeof(ImgBuf));
+    if (!b) {
+        cairo_surface_destroy(dst);
+        Tcl_SetResult(interp, "image_scale: out of memory", TCL_STATIC);
+        return TCL_ERROR;
+    }
+    b->id      = g_next_img_id++;
+    b->surface = dst;
+    b->width   = dw;
+    b->height  = dh;
+
+    if (!img_store(b)) {
+        cairo_surface_destroy(dst);
+        free(b);
+        Tcl_SetObjResult(interp,
+            Tcl_ObjPrintf("image_scale: pool full (max %d)", MAX_IMG));
+        return TCL_ERROR;
+    }
+
+    Tcl_SetObjResult(interp, Tcl_NewIntObj(b->id));
+    return TCL_OK;
+}
+
+
+/* -------------------------------------------------------------- */
+/* image_load_surface ctx_id src_ctx_id -> img_id                  */
+/* Kopiert die Surface eines anderen Context als ImgBuf.           */
+/* Kein PNG-Roundtrip — direkte Pixel-Kopie via cairo_surface      */
+/* -------------------------------------------------------------- */
+static int CairoImageLoadSurfaceCmd(ClientData cd, Tcl_Interp *interp,
+    int objc, Tcl_Obj *const objv[])
+{
+    (void)cd;
+    if (objc < 4) {
+        Tcl_WrongNumArgs(interp, 2, objv, "ctx_id src_ctx_id");
+        return TCL_ERROR;
+    }
+    int ctx_id;     GET_INT(interp, objv[2], ctx_id);
+    int src_ctx_id; GET_INT(interp, objv[3], src_ctx_id);
+
+    CairoCtx *src = ctx_find(src_ctx_id);
+    if (!src) {
+        Tcl_SetResult(interp, "image_load_surface: invalid src_ctx_id", TCL_STATIC);
+        return TCL_ERROR;
+    }
+
+    int sw = src->width;
+    int sh = src->height;
+
+    /* Neue ARGB32 Surface erstellen und Pixel kopieren */
+    cairo_surface_t *dst = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, sw, sh);
+    if (!dst || cairo_surface_status(dst) != CAIRO_STATUS_SUCCESS) {
+        if (dst) cairo_surface_destroy(dst);
+        Tcl_SetResult(interp, "image_load_surface: surface create failed", TCL_STATIC);
+        return TCL_ERROR;
+    }
+
+    cairo_t *cr = cairo_create(dst);
+    cairo_set_source_surface(cr, src->surface, 0, 0);
+    cairo_paint(cr);
+    cairo_destroy(cr);
+    cairo_surface_flush(dst);
+
+    ImgBuf *b = (ImgBuf*)calloc(1, sizeof(ImgBuf));
+    if (!b) {
+        cairo_surface_destroy(dst);
+        Tcl_SetResult(interp, "image_load_surface: out of memory", TCL_STATIC);
+        return TCL_ERROR;
+    }
+    b->id      = g_next_img_id++;
+    b->surface = dst;
+    b->width   = sw;
+    b->height  = sh;
+
+    if (!img_store(b)) {
+        cairo_surface_destroy(dst);
+        free(b);
+        Tcl_SetObjResult(interp,
+            Tcl_ObjPrintf("image_load_surface: pool full (max %d)", MAX_IMG));
+        return TCL_ERROR;
+    }
+
+    Tcl_SetObjResult(interp, Tcl_NewIntObj(b->id));
+    return TCL_OK;
+}
+
+/* -------------------------------------------------------------- */
+/* image_info image_id -> {width height}                           */
+/* -------------------------------------------------------------- */
+static int CairoImageInfoCmd(ClientData cd, Tcl_Interp *interp,
+    int objc, Tcl_Obj *const objv[])
+{
+    (void)cd;
+    if (objc < 4) {
+        Tcl_WrongNumArgs(interp, 2, objv, "ctx_id image_id");
+        return TCL_ERROR;
+    }
+    int img_id; GET_INT(interp, objv[3], img_id);
+    ImgBuf *b = img_find(img_id);
+    if (!b) {
+        Tcl_SetResult(interp, "image_info: invalid image_id", TCL_STATIC);
+        return TCL_ERROR;
+    }
+    Tcl_Obj *res = Tcl_NewListObj(0, NULL);
+    Tcl_ListObjAppendElement(interp, res, Tcl_NewIntObj(b->width));
+    Tcl_ListObjAppendElement(interp, res, Tcl_NewIntObj(b->height));
+    Tcl_SetObjResult(interp, res);
+    return TCL_OK;
+}
+
 static int CairoImageSizeCmd(ClientData cd, Tcl_Interp *interp,
     int objc, Tcl_Obj *const objv[])
 {
@@ -3179,7 +3583,7 @@ static int TkmCairoCmd(ClientData cd, Tcl_Interp *interp,
 {
     if (objc < 2) {
         Tcl_WrongNumArgs(interp, 1, objv,
-            "create|destroy|clear|save|size|todata|newpage|finish|image_size|select_font_face|svg_file|svg_data|svg_file_luna|svg_data_luna|svg_size_luna|"
+            "create|destroy|clear|save|size|todata|newpage|finish|image_size|image_load|image_blit|image_free|image_info|select_font_face|svg_file|svg_data|svg_file_luna|svg_data_luna|svg_size_luna|"
             "push|pop|clip_rect|clip_path|clip_reset|"
             "image|rect|line|circle|ellipse|arc|poly|path|text|text_path|"
             "font_measure|transform|gradient_linear|gradient_radial ...");
@@ -3195,6 +3599,7 @@ static int TkmCairoCmd(ClientData cd, Tcl_Interp *interp,
     else if (!strcmp(sub,"size"))             return CairoSizeCmd(cd,interp,objc,objv);
     else if (!strcmp(sub,"todata"))           return CairoToDataCmd(cd,interp,objc,objv);
     else if (!strcmp(sub,"topng"))            return CairoToPngCmd(cd,interp,objc,objv);
+    else if (!strcmp(sub,"toppm"))            return CairoToPpmCmd(cd,interp,objc,objv);
     else if (!strcmp(sub,"image_data"))       return CairoImageDataCmd(cd,interp,objc,objv);
     else if (!strcmp(sub,"save"))             return CairoSaveCmd(cd,interp,objc,objv);
     else if (!strcmp(sub,"newpage"))          return CairoNewPageCmd(cd,interp,objc,objv);
@@ -3206,6 +3611,12 @@ static int TkmCairoCmd(ClientData cd, Tcl_Interp *interp,
     else if (!strcmp(sub,"clip_reset"))       return CairoClipResetCmd(cd,interp,objc,objv);
     else if (!strcmp(sub,"image"))            return CairoImageCmd(cd,interp,objc,objv);
     else if (!strcmp(sub,"image_size"))       return CairoImageSizeCmd(cd,interp,objc,objv);
+    else if (!strcmp(sub,"image_load"))       return CairoImageLoadCmd(cd,interp,objc,objv);
+    else if (!strcmp(sub,"image_blit"))       return CairoImageBlitCmd(cd,interp,objc,objv);
+    else if (!strcmp(sub,"image_free"))       return CairoImageFreeCmd(cd,interp,objc,objv);
+    else if (!strcmp(sub,"image_info"))       return CairoImageInfoCmd(cd,interp,objc,objv);
+    else if (!strcmp(sub,"image_scale"))      return CairoImageScaleCmd(cd,interp,objc,objv);
+    else if (!strcmp(sub,"image_load_surface")) return CairoImageLoadSurfaceCmd(cd,interp,objc,objv);
     else if (!strcmp(sub,"svg_file"))         return CairoSvgFileCmd(cd,interp,objc,objv);
     else if (!strcmp(sub,"svg_data"))         return CairoSvgDataCmd(cd,interp,objc,objv);
 #ifdef HAVE_LUNASVG

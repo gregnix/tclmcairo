@@ -1,6 +1,6 @@
 # tclmcairo — API Reference
 
-Version 0.3.4 · BSD License
+Version 0.3.5 · BSD License
 
 ---
 

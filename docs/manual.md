@@ -2,7 +2,7 @@
 
 Cairo 2D graphics for Tcl. No Tk required. Runs in `tclsh`.
 
-**Version:** 0.3.4 · **License:** BSD · **Tcl:** 8.6 / 9.0  
+**Version:** 0.3.5 · **License:** BSD · **Tcl:** 8.6 / 9.0  
 **Platform:** Linux, Windows (MSYS2, BAWT), macOS  
 **Repository:** https://github.com/gregnix/tclmcairo
 
@@ -228,6 +228,51 @@ See `docs/svg2cairo.md` for details and limitations.
 
 ---
 
+
+## Image Buffer Pool
+
+Bilder einmalig in RAM laden für schnelles Pan/Zoom ohne Disk-Zugriff.
+
+```tcl
+# Einmal laden
+set id [$ctx image_load "foto.jpg"]
+lassign [$ctx image_info $id] iw ih
+
+# Zoom: skalierte Kopie erstellen (nur bei Zoom-Änderung)
+set sid [$ctx image_scale $id 800 600]
+
+# Pan: schnell blitten (kein Disk-Zugriff, kein Scaling)
+$ctx image_blit $sid $x $y
+
+# Freigeben
+$ctx image_free $sid
+$ctx image_free $id
+```
+
+Surface direkt als Image-Buffer speichern (kein PNG-Roundtrip):
+
+```tcl
+set tmpctx [tclmcairo::new $w $h]
+# ... zeichnen ...
+set id [$ctx image_load_surface [$tmpctx id]]
+$tmpctx destroy
+$ctx image_blit $id 0 0
+```
+
+---
+
+## toppm — Schnelle Tk-Integration
+
+```tcl
+set ppm [$ctx toppm]
+$tkphoto put $ppm -format ppm
+```
+
+PPM (P6 RGB24) ist ~10× schneller als `topng` — kein zlib-Encoding.
+Wird von `tkmcairo::surface` automatisch verwendet wenn verfügbar.
+
+---
+
 ## Images
 
 ```tcl
@@ -359,6 +404,7 @@ make demo   ;# generates demos/*.png *.pdf *.svg
 | 19 | save -chan |
 | 20 | text_extents + select_font_face |
 | 21 | svg_file + svg_data (nanosvg) |
+| 22 | image_load / image_blit / image_scale / toppm |
 
 Interactive: `wish demos/demo-coordinates.tcl`  
 Node editor: `wish demos/nodeeditor.tcl`

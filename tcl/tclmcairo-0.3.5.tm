@@ -44,7 +44,7 @@
 #
 #   $ctx destroy
 
-package provide tclmcairo 0.3.4
+package provide tclmcairo 0.3.5
 
 namespace eval ::tclmcairo {
     variable _libloaded 0
@@ -222,7 +222,13 @@ oo::define tclmcairo::context {
 
     # -- Images --
     method image      {filename x y args} { tclmcairo image      $_id $filename $x $y {*}$args }
-    method image_size       {filename}          { tclmcairo image_size       $_id $filename }
+    method image_size         {filename}          { tclmcairo image_size         $_id $filename }
+    method image_load         {filename}          { tclmcairo image_load         $_id $filename }
+    method image_blit         {img_id x y args}   { tclmcairo image_blit         $_id $img_id $x $y {*}$args }
+    method image_free         {img_id}            { tclmcairo image_free         $_id $img_id }
+    method image_info         {img_id}            { tclmcairo image_info         $_id $img_id }
+    method image_scale        {img_id w h}        { tclmcairo image_scale        $_id $img_id $w $h }
+    method image_load_surface {src_id}            { tclmcairo image_load_surface $_id $src_id }
     method select_font_face {family args}       { tclmcairo select_font_face $_id $family {*}$args }
     method svg_file  {filename x y args}        { tclmcairo svg_file  $_id $filename $x $y {*}$args }
     method svg_data      {svgdata  x y args}    { tclmcairo svg_data      $_id $svgdata  $x $y {*}$args }
@@ -239,6 +245,7 @@ oo::define tclmcairo::context {
 
 oo::define tclmcairo::context {
     # PNG bytes (komprimiert, nicht rohe Pixel)
+    method toppm    {} { tclmcairo toppm $_id }
     method topng    {}                       { tclmcairo topng       $_id }
     # PNG aus Bytearray zeichnen
     method image_data {bytes x y args}       { tclmcairo image_data  $_id $bytes $x $y {*}$args }

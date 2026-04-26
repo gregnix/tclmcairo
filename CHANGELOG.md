@@ -1,85 +1,131 @@
 # tclmcairo Changelog
 
+## v0.3.5 (2026-04-16)
+
+**Image Buffer Pool — fast pan/zoom without disk access**
+
+Load images once into RAM and blit quickly — no repeated disk
+reads on pan/zoom. Essential for the tkmcairo imageviewer.
+
+New commands:
+```tcl
+$ctx image_load filename        -> image_id   # load once -> RAM
+$ctx image_info image_id        -> {w h}
+$ctx image_blit image_id x y ?-width w? ?-height h? ?-alpha a?
+$ctx image_scale image_id w h   -> new_id     # scaled copy
+$ctx image_free image_id
+$ctx image_load_surface src_ctx_id -> image_id  # no PNG round-trip
+```
+
+Example:
+```tcl
+set id [$ctx image_load "photo.jpg"]     ;# load once
+lassign [$ctx image_info $id] w h        ;# query size
+$ctx image_blit $id 0 0 -width 400       ;# fast draw
+$ctx image_blit $id 0 0 -alpha 0.5       ;# with transparency
+$ctx image_free $id                      ;# release
+```
+
+**`toppm`** — PPM bytearray (~10× faster than topng, no zlib):
+```tcl
+$ctx toppm -> PPM bytearray (P6 RGB24)
+$tkphoto put [$ctx toppm] -format ppm
+```
+
+- PNG (always) and JPEG (when `HAVE_LIBJPEG`) supported
+- Pool: max. 64 simultaneously loaded images (`MAX_IMG`)
+- IDs are global (independent of the Cairo context)
+- `image_scale`: bilinear filter (`CAIRO_FILTER_BILINEAR`)
+- OO wrapper: all 7 new methods in `tclmcairo-0.3.5.tm`
+- New tests: 8 tests (`image_load-1.0` to `image_load-1.7`)
+
+**tkmcairo imageviewer:** `imgtools` + Tk Canvas instead of surface/topng —
+pan and zoom now smooth even for large images.
+
+**201/201 tests: Tcl 8.6 ✔**
+
 ## v0.3.4 (2026-04-15)
 
-### svg2cairo-0.1.tm — Bugfixes
+### svg2cairo-0.1.tm — Bug fixes
 
-7 Fehler behoben (nach Praxistest mit decode/, vgs/, w3org/ SVG-Suites):
+7 bugs fixed (after testing against decode/, vgs/, w3org/ SVG suites):
 
-- **SV-1:** Frühes `return` bei fehlendem CSS-Match — bei `hasStyle=1`
-  wurden Shapes ohne CSS-Klasse/ID nicht gerendert (fehlende Shapes).
-  SVG-Default `fill=black` eingeführt.
+- **SV-1:** Early `return` on missing CSS match — with `hasStyle=1`,
+  shapes without a CSS class/id were not rendered (missing shapes).
+  SVG default `fill=black` introduced.
 
-- **SV-2:** `<defs>` von nanosvg als Shape gerendert — Marker-Paths aus
-  `<defs>` erschienen als falsch positionierte Linien.
-  Fix: `<defs>…</defs>` vor nanosvg-Pass via `string first/replace` entfernen.
+- **SV-2:** `<defs>` rendered as a shape by nanosvg — marker paths
+  inside `<defs>` appeared as misplaced lines.
+  Fix: strip `<defs>…</defs>` before the nanosvg pass via
+  `string first/replace`.
 
-- **SV-3:** `[$node asText]` liefert rekursiv Kinder-Inhalte — Text wurde
-  doppelt gerendert (an (0,0) + via textPath-Fallback).
-  Fix: nur direkte `TEXT_NODE`-Kinder iterieren.
+- **SV-3:** `[$node asText]` returns child contents recursively — text
+  was rendered twice (once at (0,0), once via the textPath fallback).
+  Fix: iterate only direct `TEXT_NODE` children.
 
-- **SV-4:** `NOT_AN_ELEMENT`-Fehler bei Textknoten in `childNodes` —
-  tDOM liefert auch Text- und Kommentarknoten.
-  Fix: `nodeType eq "ELEMENT_NODE"` Check in `_renderNode`.
+- **SV-4:** `NOT_AN_ELEMENT` error on text nodes in `childNodes` —
+  tDOM also returns text and comment nodes.
+  Fix: `nodeType eq "ELEMENT_NODE"` check in `_renderNode`.
 
-- **SV-5:** CSS nicht an `<g>`-Kinder vererbt — `#group1 { stroke:red }`
-  auf `<g>` hatte keinen Effekt auf Kinder-Shapes.
-  Fix: `_cssForNode` in `_renderNode` für alle Nodes auswerten.
+- **SV-5:** CSS not inherited by `<g>` children — `#group1 { stroke:red }`
+  on `<g>` had no effect on child shapes.
+  Fix: evaluate `_cssForNode` in `_renderNode` for every node.
 
-- **SV-6:** `path` ohne Transform-Skalierung — SVG-Pfade ignorierten
-  sx/sy/ox/oy und erschienen bei scale>1 falsch positioniert.
-  Fix: Cairo-Transform-Matrix vor/nach `path`-Aufruf setzen/wiederherstellen.
+- **SV-6:** `path` without transform scaling — SVG paths ignored
+  sx/sy/ox/oy and were misplaced when scale > 1.
+  Fix: set/restore the Cairo transform matrix around the `path` call.
 
-- **SV-7:** `stroke-width` / `stroke-opacity` nicht als direkte Attribute
-  gelesen — `_nodeStyle` ignorierte diese XML-Attribute.
+- **SV-7:** `stroke-width` / `stroke-opacity` not read as direct attributes —
+  `_nodeStyle` ignored these XML attributes.
 
-### Build-Fixes
+### Build fixes
 
-- `build-win.bat`: Klammern in `echo`-Zeilen innerhalb `if`-Blöcken
-  mit `^` escaped (CMD-Bug — `)` schloss `if`-Block vorzeitig →
-  DLL wurde ohne lunasvg gebaut)
-- `pkgIndex.tcl.in`: `svg2cairo 0.1` Eintrag ergänzt,
-  `@PACKAGE_VERSION@` durchgängig (kein Hardcode mehr)
+- `build-win.bat`: parentheses inside `echo` lines within `if` blocks
+  escaped with `^` (CMD bug — `)` closed the `if` block prematurely,
+  so the DLL was built without lunasvg).
+- `pkgIndex.tcl.in`: added `svg2cairo 0.1` entry; `@PACKAGE_VERSION@`
+  used consistently (no more hard-coded version).
 
-### Dokumentation
+### Documentation
 
-- `docs/svg2cairo.md` — neu: vollständige API-Referenz
-- `docs/api-reference.md` — SVG-Abschnitt (nanosvg/lunasvg/svg2cairo),
+- `docs/svg2cairo.md` — new: complete API reference
+- `docs/api-reference.md` — SVG section (nanosvg/lunasvg/svg2cairo),
   `image_size`, `select_font_face`, `text_extents`
-- `docs/manual.md` — SVG-Rendering-Abschnitt, Demo 20+21
-- `nogit/TODO-0.4.md` — svg2cairo Known Issues (SV-KI-1 bis SV-KI-7)
+- `docs/manual.md` — SVG rendering section, demos 20 + 21
+- `nogit/TODO-0.4.md` — svg2cairo known issues (SV-KI-1 to SV-KI-7)
 
 ---
 
 ## v0.3.4 (2026-04-13)
 
-**nanosvg eingebaut — SVG direkt auf Cairo-Context rendern**
+**nanosvg embedded — render SVG directly onto a Cairo context**
 
-Neue Befehle:
+New commands:
 ```tcl
 $ctx svg_file  filename x y ?-width w? ?-height h? ?-scale s?
 $ctx svg_data  svgstring x y ?-width w? ?-height h? ?-scale s?
 ```
 
-- nanosvg.h + nanosvgrast.h (Mikko Mononen, zlib/libpng-Lizenz) direkt eingebettet
-- Kein librsvg, keine GLib, keine zusätzlichen DLLs auf Windows
-- RGBA→ARGB Premultiplied-Alpha Konversion korrekt
-- Tk 8.6 + Tk 9.0 kompatibel (unabhängig von tksvg)
-- THIRD-PARTY-LICENSES.txt aktualisiert
+- `nanosvg.h` + `nanosvgrast.h` (Mikko Mononen, zlib/libpng license)
+  embedded directly
+- No librsvg, no GLib, no extra DLLs on Windows
+- Correct RGBA → ARGB premultiplied-alpha conversion
+- Tk 8.6 + Tk 9.0 compatible (independent of tksvg)
+- `THIRD-PARTY-LICENSES.txt` updated
 
-**svg2cairo-0.1.tm** — neues Tcl-Modul (tDOM SVG-Postprocessor):
-- CSS `<style>` (tag, .class, #id), 50 W3C-Farbnamen
-- `<text>`, `<tspan>`, `<textPath>` Fallback
-- DOCTYPE-Strip vor tDOM-Parse
+**svg2cairo-0.1.tm** — new Tcl module (tDOM SVG postprocessor):
+- CSS `<style>` (tag, .class, #id), 50 W3C color names
+- `<text>`, `<tspan>`, `<textPath>` fallback
+- DOCTYPE strip before tDOM parse
 
-**lunasvg optional** (C++ Wrapper, HAVE_LUNASVG):
+**lunasvg optional** (C++ wrapper, `HAVE_LUNASVG`):
 ```tcl
 $ctx svg_file_luna filename x y ?-width w? ?-height h? ?-scale s?
 $ctx svg_data_luna svgstring x y ?opts?
 $ctx svg_size_luna filename -> {width height}
 ```
 
-**193/193 Tests: Tcl 8.6 + Tcl 9.0 ✔**
+**193/193 tests: Tcl 8.6 + Tcl 9.0 ✔**
 
 ## v0.3.3 (2026-04-12)
 

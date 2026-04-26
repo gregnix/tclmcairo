@@ -1854,9 +1854,9 @@ test lowlevel-1.16 {rel_move_to moves current point} -body {
 # ================================================================
 
 # Fix 1: package version consistency
-test robustness-1.0 {package version is 0.3.3} -body {
+test robustness-1.0 {package version is 0.3.5} -body {
     package present tclmcairo
-} -result 0.3.4
+} -result 0.3.5
 
 # Fix 5: low-level commands check argument count
 test robustness-1.1 {move_to requires x y} -body {
@@ -2013,6 +2013,112 @@ test save-chan-7 {save -chan text-mode channel produces valid PDF} -body {
     set hdr [read [set fh [open $f rb]] 5]; close $fh
     file delete -force $f
     string match "%PDF*" $hdr
+} -result 1
+
+
+# ================================================================
+# image_load / image_blit / image_free / image_info  (v0.3.5)
+# ================================================================
+
+proc imgtest_png {} {
+    set testimg [file normalize         [file join [file dirname [info script]] ../demos/demo-blit-icons.png]]
+    if {[file exists $testimg]} { return $testimg }
+    # Fallback: erstes PNG in /usr/share/pixmaps
+    set pngs [glob -nocomplain /usr/share/pixmaps/*.png]
+    if {[llength $pngs]} { return [lindex $pngs 0] }
+    return ""
+}
+
+test image_load-1.0 {image_load returns numeric id} -body {
+    set img [imgtest_png]
+    if {$img eq ""} { return "skip" }
+    set ctx [tclmcairo::new 10 10]
+    set id [$ctx image_load $img]
+    $ctx image_free $id
+    $ctx destroy
+    string is integer -strict $id
+} -result 1
+
+test image_load-1.1 {image_load bad file -> error} -body {
+    set ctx [tclmcairo::new 10 10]
+    set err ""
+    catch { $ctx image_load /nonexistent/file.png } err
+    $ctx destroy
+    expr {$err ne ""}
+} -result 1
+
+test image_load-1.2 {image_info returns width height} -body {
+    set img [imgtest_png]
+    if {$img eq ""} { return "skip" }
+    set ctx [tclmcairo::new 10 10]
+    set id [$ctx image_load $img]
+    set info [$ctx image_info $id]
+    $ctx image_free $id
+    $ctx destroy
+    expr {[llength $info] == 2 && [lindex $info 0] > 0 && [lindex $info 1] > 0}
+} -result 1
+
+test image_load-1.3 {image_blit renders into context} -body {
+    set img [imgtest_png]
+    if {$img eq ""} { return "skip" }
+    set f [tmpfile png]
+    set ctx [tclmcairo::new 200 200]
+    $ctx clear 1 1 1
+    set id [$ctx image_load $img]
+    $ctx image_blit $id 10 10
+    $ctx image_free $id
+    $ctx save $f
+    set ok [expr {[file exists $f] && [file size $f] > 200}]
+    $ctx destroy; cleanup $f; set ok
+} -result 1
+
+test image_load-1.4 {image_blit with -width -height scaling} -body {
+    set img [imgtest_png]
+    if {$img eq ""} { return "skip" }
+    set f [tmpfile png]
+    set ctx [tclmcairo::new 200 200]
+    $ctx clear 1 1 1
+    set id [$ctx image_load $img]
+    $ctx image_blit $id 0 0 -width 100 -height 100
+    $ctx image_free $id
+    $ctx save $f
+    set ok [expr {[file exists $f] && [file size $f] > 200}]
+    $ctx destroy; cleanup $f; set ok
+} -result 1
+
+test image_load-1.5 {image_free invalid id -> error} -body {
+    set ctx [tclmcairo::new 10 10]
+    set err ""
+    catch { $ctx image_free 9999 } err
+    $ctx destroy
+    expr {$err ne ""}
+} -result 1
+
+test image_load-1.6 {multiple loads independent ids} -body {
+    set img [imgtest_png]
+    if {$img eq ""} { return "skip" }
+    set ctx [tclmcairo::new 10 10]
+    set id1 [$ctx image_load $img]
+    set id2 [$ctx image_load $img]
+    set ok [expr {$id1 != $id2}]
+    $ctx image_free $id1
+    $ctx image_free $id2
+    $ctx destroy
+    set ok
+} -result 1
+
+test image_load-1.7 {image_blit with -alpha} -body {
+    set img [imgtest_png]
+    if {$img eq ""} { return "skip" }
+    set f [tmpfile png]
+    set ctx [tclmcairo::new 200 200]
+    $ctx clear 1 1 1
+    set id [$ctx image_load $img]
+    $ctx image_blit $id 10 10 -alpha 0.5
+    $ctx image_free $id
+    $ctx save $f
+    set ok [expr {[file exists $f] && [file size $f] > 200}]
+    $ctx destroy; cleanup $f; set ok
 } -result 1
 
 # ================================================================

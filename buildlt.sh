@@ -55,7 +55,7 @@ g++ -shared -o libtclmcairo.so \
     -lcairo -ljpeg -lm -ltclstub8.6 -lstdc++
 
 echo "=== Installieren (nur libtclmcairo.so) ==="
-sudo cp libtclmcairo.so /usr/lib/tcltk/tclmcairo0.3.4/
+sudo cp libtclmcairo.so /usr/lib/tcltk/tclmcairo0.3.5/
 
 echo "=== lunasvg libs systemweit ==="
 for f in ${LUNADIR}/build_shared/*.so*; do

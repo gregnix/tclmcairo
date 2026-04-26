@@ -3,9 +3,9 @@
 A lightweight Cairo binding for Tcl — no Tk required.
 Runs in `tclsh`. Outputs PNG, PDF, SVG, PS, EPS.
 
-**Version:** 0.3.4 · **License:** BSD · **Tcl:** 8.6 / 9.0  
+**Version:** 0.3.5 · **License:** BSD · **Tcl:** 8.6 / 9.0  
 **Platform:** Linux, Windows (MSYS2 MINGW64, BAWT 3.2), macOS  
-**Tests:** 193/193 (Linux tclmcairo) · 67/67 (Linux canvas2cairo) · 193/193 (Windows)
+**Tests:** 201/201 (Linux tclmcairo) · 67/67 (Linux canvas2cairo) · 193/193 (Windows)
 
 ---
 
@@ -44,17 +44,17 @@ $ctx destroy
 ### SVG rendering
 
 ```tcl
-# nanosvg (eingebettet, keine Abhängigkeiten)
+# nanosvg (embedded, no external dependencies)
 package require tclmcairo
 set ctx [tclmcairo::new 400 300]
 $ctx svg_file "logo.svg" 0 0 -width 400 -height 300
 $ctx save "output.png"
 $ctx destroy
 
-# lunasvg (optional, volle CSS + Text-Unterstützung)
+# lunasvg (optional, full CSS + text support)
 $ctx svg_file_luna "diagram.svg" 0 0 -width 400 -height 300
 
-# svg2cairo (tDOM-basiert, CSS <style>, <text>, <tspan>)
+# svg2cairo (tDOM-based; CSS <style>, <text>, <tspan>)
 package require svg2cairo
 svg2cairo::render $ctx "diagram.svg" -scale 2.0
 ```
@@ -96,11 +96,16 @@ canvas2cairo::export .c output.ps     ;# PostScript
 **Images:** PNG + JPEG load · `image_data` · `image_size` (w/h without drawing)
 · JPEG MIME embedding in PDF/SVG
 
-**SVG:** `svg_file`, `svg_data` (nanosvg, eingebettet) ·
+**Image Buffer Pool (0.3.5):** `image_load` / `image_info` / `image_blit` /
+`image_scale` / `image_free` / `image_load_surface` — load images once into
+RAM and blit repeatedly without disk access. Pool holds up to 64 images.
+
+**SVG:** `svg_file`, `svg_data` (nanosvg, embedded) ·
 `svg_file_luna`, `svg_data_luna`, `svg_size_luna` (lunasvg, optional)
 
-**Output:** PNG, PDF, SVG, PS, EPS · `save -chan` · `topng` · `todata` (ARGB32)
-· `surface_copy` · multi-page via `newpage`/`finish`
+**Output:** PNG, PDF, SVG, PS, EPS · `save -chan` · `topng` · `toppm` (0.3.5,
+~10× faster than `topng`) · `todata` (ARGB32) · `surface_copy` · multi-page
+via `newpage`/`finish`
 
 **Compositing:** `operator` (29 Porter-Duff + CSS blend modes),
 `push`/`pop`, `clip_rect`, `clip_path`, `clip_reset`, `blit`
@@ -145,32 +150,32 @@ make && sudo make install
 make test
 ```
 
-### Linux — mit lunasvg
+### Linux — with lunasvg
 
 ```bash
-# lunasvg einmalig bauen:
+# Build lunasvg once:
 cd ~/lunasvg && cmake -B build_shared -DBUILD_SHARED_LIBS=ON . && cmake --build build_shared
 
-# tclmcairo mit lunasvg:
+# tclmcairo with lunasvg:
 autoconf && ./configure --with-tcl=/usr/lib/tcl8.6
 make clean && make && sudo make install
 bash buildlt.sh
 ```
 
-Reihenfolge beachten: `sudo make install` vor `buildlt.sh`.
-Details: `INSTALL.md`, `nogit/lunasvg-build.md`.
+Order matters: `sudo make install` before `buildlt.sh`.
+See `INSTALL.md` and `nogit/lunasvg-build.md` for details.
 
 ### Windows (BAWT + MSYS2)
 
 ```bat
-REM ohne lunasvg:
+REM without lunasvg:
 build-win.bat 86
 
-REM mit lunasvg:
+REM with lunasvg:
 set LUNASVG_DIR=C:\msys64\home\greg\src\lunasvg
 build-win.bat 86
 
-xcopy /e /i /y dist\tclmcairo0.3.4 C:\Tcl\lib\tclmcairo0.3.4
+xcopy /e /i /y dist\tclmcairo0.3.5 C:\Tcl\lib\tclmcairo0.3.5
 test-win.bat 86
 ```
 

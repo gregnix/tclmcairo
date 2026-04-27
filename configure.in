@@ -19,7 +19,7 @@
 #   ./configure --with-tcl=/usr/lib/tcl8.6 --disable-jpeg
 #-----------------------------------------------------------------------
 
-AC_INIT([tclmcairo], [0.3.5])
+AC_INIT([tclmcairo], [0.3.6])
 
 TEA_INIT([3.9])
 
@@ -142,7 +142,7 @@ TEA_ADD_INCLUDES([])
 TEA_ADD_LIBS([-lm])
 TEA_ADD_CFLAGS([])
 TEA_ADD_STUB_SOURCES([])
-TEA_ADD_TCL_SOURCES([tcl/tclmcairo-0.3.5.tm tcl/canvas2cairo-0.1.tm tcl/shape_renderer-0.1.tm tcl/svg2cairo-0.1.tm])
+TEA_ADD_TCL_SOURCES([tcl/tclmcairo-0.3.6.tm tcl/canvas2cairo-0.1.tm tcl/shape_renderer-0.1.tm tcl/svg2cairo-0.1.tm])
 
 #--------------------------------------------------------------------
 # Tcl Public Headers

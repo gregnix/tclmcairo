@@ -672,6 +672,255 @@ test canvas2cairo-chan-4 {export -chan read-only gives error} -constraints hasTk
     string match "*not writable*" $err
 } -result 1
 
+# ----------------------------------------------------------------
+# -exclude-tags: skip canvas items carrying given tags
+# ----------------------------------------------------------------
+
+# Helper: count opaque pixels of a given color in a PNG using tclmcairo
+# Returns a list {totalPixels redPixels} where red means a roughly
+# pure-red pixel (R>200, G<60, B<60, A>128).
+proc _png_red_count {pngfile} {
+    package require tclmcairo
+    # Read PNG into a fresh context
+    set fh [open $pngfile rb]; fconfigure $fh -translation binary
+    set pngbytes [read $fh]; close $fh
+    # Decode by drawing onto a context
+    # Use image_data which decodes PNG bytes
+    # First, get size via a tiny ctx
+    set tmp [tclmcairo::new 1 1]
+    # We don't have a 'png decode -> w h' shortcut without disk;
+    # use image_size on the file path
+    lassign [$tmp image_size $pngfile] w h
+    $tmp destroy
+
+    set ctx [tclmcairo::new $w $h]
+    $ctx clear 0 0 0 0
+    $ctx image_data $pngbytes 0 0
+    set raw [$ctx todata]
+    $ctx destroy
+
+    set total 0
+    set red   0
+    set len [string length $raw]
+    for {set i 0} {$i < $len} {incr i 4} {
+        set b [scan [string index $raw $i]       %c]
+        set g [scan [string index $raw [expr {$i+1}]] %c]
+        set r [scan [string index $raw [expr {$i+2}]] %c]
+        set a [scan [string index $raw [expr {$i+3}]] %c]
+        incr total
+        if {$r > 200 && $g < 60 && $b < 60 && $a > 128} { incr red }
+    }
+    return [list $total $red]
+}
+
+test canvas2cairo-exclude-1 {-exclude-tags removes red items from output} \
+    -constraints hasTk -body {
+    set c [canvas .test_xt1 -width 100 -height 80 -background white]
+    # Background rectangle (blue, kept)
+    $c create rectangle 0 0 100 80 -fill blue -outline ""
+    # A "selection marker" rectangle (red, should be excluded)
+    $c create rectangle 20 20 80 60 -fill red -outline "" -tags selMarker
+    update idletasks
+    set f /tmp/test_xt1_[pid].png
+    canvas2cairo::export $c $f -exclude-tags {selMarker}
+    lassign [_png_red_count $f] total red
+    file delete -force $f
+    destroy .test_xt1
+    # With selMarker excluded, no red pixels should remain
+    expr {$red == 0 && $total > 0}
+} -result 1
+
+test canvas2cairo-exclude-2 {without -exclude-tags red items appear} \
+    -constraints hasTk -body {
+    set c [canvas .test_xt2 -width 100 -height 80 -background white]
+    $c create rectangle 0 0 100 80 -fill blue -outline ""
+    $c create rectangle 20 20 80 60 -fill red -outline "" -tags selMarker
+    update idletasks
+    set f /tmp/test_xt2_[pid].png
+    canvas2cairo::export $c $f
+    lassign [_png_red_count $f] total red
+    file delete -force $f
+    destroy .test_xt2
+    # Without the option, the red rectangle is present
+    expr {$red > 0}
+} -result 1
+
+test canvas2cairo-exclude-3 {-exclude-tags accepts multiple tags} \
+    -constraints hasTk -body {
+    set c [canvas .test_xt3 -width 100 -height 80 -background white]
+    $c create rectangle 0 0 100 80 -fill blue -outline ""
+    $c create rectangle 10 10 30 30 -fill red -outline "" -tags selMarker
+    $c create rectangle 60 50 90 70 -fill red -outline "" -tags gridLine
+    update idletasks
+    set f /tmp/test_xt3_[pid].png
+    canvas2cairo::export $c $f -exclude-tags {selMarker gridLine}
+    lassign [_png_red_count $f] total red
+    file delete -force $f
+    destroy .test_xt3
+    expr {$red == 0}
+} -result 1
+
+test canvas2cairo-exclude-4 {-exclude-tags '' is a no-op} \
+    -constraints hasTk -body {
+    set c [canvas .test_xt4 -width 100 -height 80 -background white]
+    $c create rectangle 0 0 100 80 -fill blue -outline ""
+    $c create rectangle 20 20 80 60 -fill red -outline "" -tags selMarker
+    update idletasks
+    set f /tmp/test_xt4_[pid].png
+    canvas2cairo::export $c $f -exclude-tags {}
+    lassign [_png_red_count $f] total red
+    file delete -force $f
+    destroy .test_xt4
+    expr {$red > 0}
+} -result 1
+
+test canvas2cairo-exclude-5 {-exclude-tags works with -chan} \
+    -constraints hasTk -body {
+    set c [canvas .test_xt5 -width 100 -height 80 -background white]
+    $c create rectangle 0 0 100 80 -fill blue -outline ""
+    $c create rectangle 20 20 80 60 -fill red -outline "" -tags selMarker
+    update idletasks
+    set f /tmp/test_xt5_[pid].png
+    set ch [open $f wb]
+    canvas2cairo::export $c -chan $ch -format png -exclude-tags {selMarker}
+    close $ch
+    lassign [_png_red_count $f] total red
+    file delete -force $f
+    destroy .test_xt5
+    expr {$red == 0 && $total > 0}
+} -result 1
+
+# ----------------------------------------------------------------
+# ready / probe — capability checks
+# ----------------------------------------------------------------
+
+test canvas2cairo-ready-1 {ready returns 1 with Tk loaded} -constraints hasTk -body {
+    canvas2cairo::ready
+} -result 1
+
+test canvas2cairo-probe-1 {probe returns dict with required keys} -body {
+    set d [canvas2cairo::probe]
+    expr {[dict exists $d status]
+          && [dict exists $d tclmcairo]
+          && [dict exists $d canvas2cairo]
+          && [dict exists $d tk]
+          && [dict exists $d features]
+          && [dict exists $d message]}
+} -result 1
+
+test canvas2cairo-probe-2 {probe reports tclmcairo version} -body {
+    set d [canvas2cairo::probe]
+    expr {[dict get $d tclmcairo] ne ""}
+} -result 1
+
+test canvas2cairo-probe-3 {probe -test runs round-trip on real canvas} \
+    -constraints hasTk -body {
+    set d [canvas2cairo::probe -test 1]
+    dict get $d status
+} -result ok
+
+test canvas2cairo-probe-4 {probe with Tk reports status ok} -constraints hasTk -body {
+    set d [canvas2cairo::probe]
+    dict get $d status
+} -result ok
+
+# ----------------------------------------------------------------
+# svgItem — high-level "drop SVG onto canvas" helper
+# ----------------------------------------------------------------
+
+# Helper: write a tiny test SVG to disk
+proc _make_test_svg {filename {w 100} {h 80}} {
+    set fh [open $filename w]
+    puts $fh "<?xml version=\"1.0\"?>"
+    puts $fh "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"$w\" height=\"$h\">"
+    puts $fh "  <rect x=\"5\" y=\"5\" width=\"[expr {$w-10}]\" height=\"[expr {$h-10}]\" fill=\"green\"/>"
+    puts $fh "</svg>"
+    close $fh
+}
+
+test canvas2cairo-svgItem-1 {svgItem creates a canvas image item} \
+    -constraints hasTk -body {
+    set c [canvas .test_si1 -width 200 -height 160]
+    set svg /tmp/test_si1_[pid].svg
+    _make_test_svg $svg 100 80
+
+    set itemId [canvas2cairo::svgItem $c 10 10 $svg -size {100 80}]
+    set type [$c type $itemId]
+    set hasImage [expr {[$c itemcget $itemId -image] ne ""}]
+
+    file delete -force $svg
+    destroy .test_si1
+    list $type $hasImage
+} -result {image 1}
+
+test canvas2cairo-svgItem-2 {svgItem with -tags propagates tags} \
+    -constraints hasTk -body {
+    set c [canvas .test_si2 -width 200 -height 160]
+    set svg /tmp/test_si2_[pid].svg
+    _make_test_svg $svg
+
+    set itemId [canvas2cairo::svgItem $c 10 10 $svg \
+                    -size {80 60} -tags {svgthing first}]
+    set tags [$c gettags $itemId]
+    set hasSvgthing [expr {"svgthing" in $tags}]
+    set hasFirst    [expr {"first" in $tags}]
+
+    file delete -force $svg
+    destroy .test_si2
+    list $hasSvgthing $hasFirst
+} -result {1 1}
+
+test canvas2cairo-svgItem-3 {svgItem without -size uses sizeForFit} \
+    -constraints hasTk -body {
+    set c [canvas .test_si3 -width 800 -height 600]
+    set svg /tmp/test_si3_[pid].svg
+    _make_test_svg $svg 400 300   ;# original SVG size
+
+    set itemId [canvas2cairo::svgItem $c 10 10 $svg \
+                    -maxsize {200 150}]
+    set bbox [$c bbox $itemId]
+    file delete -force $svg
+    destroy .test_si3
+
+    # Item should fit within roughly 200x150 (allow ±10 px tolerance)
+    lassign $bbox x1 y1 x2 y2
+    set w [expr {$x2 - $x1}]
+    set h [expr {$y2 - $y1}]
+    expr {$w >= 100 && $w <= 220 && $h >= 75 && $h <= 165}
+} -result 1
+
+test canvas2cairo-svgResize-1 {svgResize changes the rendered size} \
+    -constraints hasTk -body {
+    set c [canvas .test_sr1 -width 800 -height 600]
+    set svg /tmp/test_sr1_[pid].svg
+    _make_test_svg $svg 100 80
+
+    set itemId [canvas2cairo::svgItem $c 10 10 $svg -size {100 80}]
+    lassign [$c bbox $itemId] _ _ x2a y2a
+    set w1 [expr {$x2a - 10}]
+
+    canvas2cairo::svgResize $c $itemId -size {300 240}
+    update idletasks
+    lassign [$c bbox $itemId] _ _ x2b y2b
+    set w2 [expr {$x2b - 10}]
+
+    file delete -force $svg
+    destroy .test_sr1
+
+    # New width should be ~3x the old
+    expr {$w2 > $w1 * 2}
+} -result 1
+
+test canvas2cairo-svgResize-2 {svgResize on non-svgItem fails cleanly} \
+    -constraints hasTk -body {
+    set c [canvas .test_sr2 -width 100 -height 80]
+    set rect [$c create rectangle 0 0 50 50]
+    set err ""
+    catch {canvas2cairo::svgResize $c $rect -size {30 30}} err
+    destroy .test_sr2
+    string match "*not an svgItem*" $err
+} -result 1
+
 
 cleanup_tmpfiles
 cleanupTests

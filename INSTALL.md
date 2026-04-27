@@ -5,12 +5,12 @@
 All files install into a single directory — no split layout:
 
 ```
-<prefix>/lib/tcltk/tclmcairo0.3.4/
+<prefix>/lib/tcltk/tclmcairo0.3.6/
     pkgIndex.tcl
     libtclmcairo.so      (Linux)
     libtclmcairo.dylib   (macOS)
     tclmcairo.dll        (Windows)
-    tclmcairo-0.3.4.tm
+    tclmcairo-0.3.6.tm
     canvas2cairo-0.1.tm
     shape_renderer-0.1.tm
     svg2cairo-0.1.tm
@@ -32,7 +32,7 @@ sudo make install
 make test
 ```
 
-Installs to `/usr/lib/tcltk/tclmcairo0.3.4/` — already in `auto_path`.
+Installs to `/usr/lib/tcltk/tclmcairo0.3.6/` — already in `auto_path`.
 
 ---
 
@@ -100,18 +100,18 @@ configured prefix — no `TCLSH=...` override needed.
 ## Quick Install (no configure required)
 
 ```bash
-mkdir -p ~/lib/tclmcairo0.3.4
-cp libtclmcairo.so              ~/lib/tclmcairo0.3.4/
-cp pkgIndex.tcl                 ~/lib/tclmcairo0.3.4/
-cp tcl/tclmcairo-0.3.4.tm      ~/lib/tclmcairo0.3.4/
-cp tcl/canvas2cairo-0.1.tm      ~/lib/tclmcairo0.3.4/
-cp tcl/shape_renderer-0.1.tm    ~/lib/tclmcairo0.3.4/
-cp tcl/svg2cairo-0.1.tm         ~/lib/tclmcairo0.3.4/
+mkdir -p ~/lib/tclmcairo0.3.6
+cp libtclmcairo.so              ~/lib/tclmcairo0.3.6/
+cp pkgIndex.tcl                 ~/lib/tclmcairo0.3.6/
+cp tcl/tclmcairo-0.3.6.tm      ~/lib/tclmcairo0.3.6/
+cp tcl/canvas2cairo-0.1.tm      ~/lib/tclmcairo0.3.6/
+cp tcl/shape_renderer-0.1.tm    ~/lib/tclmcairo0.3.6/
+cp tcl/svg2cairo-0.1.tm         ~/lib/tclmcairo0.3.6/
 ```
 
 Then in any script or `~/.tclshrc`:
 ```tcl
-lappend auto_path ~/lib/tclmcairo0.3.4
+lappend auto_path ~/lib/tclmcairo0.3.6
 package require tclmcairo
 package require svg2cairo
 ```
@@ -169,10 +169,10 @@ set LUNASVG_DIR=C:\msys64\home\greg\src\lunasvg
 build-win.bat 86
 ```
 
-Produces `dist\tclmcairo0.3.4\` — ready to install:
+Produces `dist\tclmcairo0.3.6\` — ready to install:
 
 ```bat
-xcopy /e /i /y dist\tclmcairo0.3.4 C:\Tcl\lib\tclmcairo0.3.4
+xcopy /e /i /y dist\tclmcairo0.3.6 C:\Tcl\lib\tclmcairo0.3.6
 ```
 
 ### dist\ contents
@@ -180,7 +180,7 @@ xcopy /e /i /y dist\tclmcairo0.3.4 C:\Tcl\lib\tclmcairo0.3.4
 ```
 tclmcairo.dll
 pkgIndex.tcl
-tclmcairo-0.3.4.tm
+tclmcairo-0.3.6.tm
 canvas2cairo-0.1.tm
 shape_renderer-0.1.tm
 svg2cairo-0.1.tm
@@ -215,12 +215,12 @@ THIRD-PARTY-LICENSES.txt
 test-win.bat 86
 ```
 
-Tests run from `dist\tclmcairo0.3.4\` — all DLLs available there.
+Tests run from `dist\tclmcairo0.3.6\` — all DLLs available there.
 
 ### lunasvg Test (nach Installation)
 
 ```bat
-cd C:\Tcl\lib\tclmcairo0.3.4
+cd C:\Tcl\lib\tclmcairo0.3.6
 testlt.bat
 ```
 
@@ -239,7 +239,7 @@ sudo apt install libcairo2 libjpeg8
 brew install cairo jpeg
 
 # Windows
-# All DLLs are shipped in dist\tclmcairo0.3.4\ by build-win.bat
+# All DLLs are shipped in dist\tclmcairo0.3.6\ by build-win.bat
 ```
 
 ---
@@ -253,7 +253,7 @@ TCLLIBPATH=C:/Users/greg/tcllib
 
 Then:
 ```bat
-xcopy /e /i /y dist\tclmcairo0.3.4 C:\Users\greg\tcllib\tclmcairo0.3.4
+xcopy /e /i /y dist\tclmcairo0.3.6 C:\Users\greg\tcllib\tclmcairo0.3.6
 ```
 
 `TCLLIBPATH` is automatically added to `auto_path` — no `lappend` needed.

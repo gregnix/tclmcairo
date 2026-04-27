@@ -845,6 +845,110 @@ static int CairoSizeCmd(ClientData cd, Tcl_Interp *interp,
     return TCL_OK;
 }
 
+/*
+ * tclmcairo hasFeature ?name?
+ *
+ * Without argument: returns the list of all known feature names.
+ * With argument:    returns 1 if the feature is available, 0 otherwise.
+ *
+ * Features:
+ *   image_load          PNG/JPEG image buffer pool (image_load/blit/free/...)
+ *   image_load_surface  load existing surface into the buffer pool
+ *   image_scale         bilinear image scaling
+ *   toppm               raw PPM output (~10x faster than topng)
+ *   image_size          read PNG/JPEG dimensions without rendering
+ *   svg_file            nanosvg-based SVG rendering (always available)
+ *   svg_data            same, from in-memory SVG string
+ *   lunasvg             optional lunasvg backend (svg_file_luna etc.)
+ *   jpeg                libjpeg support compiled in (HAVE_LIBJPEG)
+ *   select_font_face    direct family/slant/weight font selection
+ *   text_extents        full font-metrics dict
+ *   gradient_linear     linear gradients
+ *   gradient_radial     radial gradients
+ */
+static int CairoHasFeatureCmd(ClientData cd, Tcl_Interp *interp,
+    int objc, Tcl_Obj *const objv[])
+{
+    (void)cd;
+
+    /* Static feature table — kept here so additions stay central.
+     * 'have' is 1 for unconditional features, 0/1 for compile-time gated. */
+    struct { const char *name; int have; } feats[] = {
+        { "image_load",         1 },
+        { "image_load_surface", 1 },
+        { "image_scale",        1 },
+        { "image_blit",         1 },
+        { "image_free",         1 },
+        { "image_info",         1 },
+        { "image_size",         1 },
+        { "image_data",         1 },
+        { "image_from_ppm",     1 },
+        { "toppm",              1 },
+        { "topng",              1 },
+        { "todata",             1 },
+        { "svg_file",           1 },
+        { "svg_data",           1 },
+#ifdef HAVE_LUNASVG
+        { "lunasvg",            1 },
+        { "svg_file_luna",      1 },
+        { "svg_data_luna",      1 },
+        { "svg_size_luna",      1 },
+#else
+        { "lunasvg",            0 },
+        { "svg_file_luna",      0 },
+        { "svg_data_luna",      0 },
+        { "svg_size_luna",      0 },
+#endif
+#ifdef HAVE_LIBJPEG
+        { "jpeg",               1 },
+#else
+        { "jpeg",               0 },
+#endif
+        { "png",                1 },   /* always built-in */
+        { "select_font_face",   1 },
+        { "text_extents",       1 },
+        { "font_measure",       1 },
+        { "gradient_linear",    1 },
+        { "gradient_radial",    1 },
+        { "clip_rect",          1 },
+        { "clip_path",          1 },
+        { "transform",          1 },
+        { "save",               1 },   /* PNG/PDF/SVG/PS/EPS export */
+        { "save_chan",          1 },   /* save -chan */
+        { "newpage",            1 },   /* multi-page PDF/PS */
+        { NULL,                 0 }
+    };
+
+    if (objc == 2) {
+        /* No name -> return list of available feature names */
+        Tcl_Obj *lst = Tcl_NewListObj(0, NULL);
+        for (int i = 0; feats[i].name; i++) {
+            if (feats[i].have)
+                Tcl_ListObjAppendElement(interp, lst,
+                    Tcl_NewStringObj(feats[i].name, -1));
+        }
+        Tcl_SetObjResult(interp, lst);
+        return TCL_OK;
+    }
+
+    if (objc != 3) {
+        Tcl_WrongNumArgs(interp, 2, objv, "?name?");
+        return TCL_ERROR;
+    }
+
+    const char *q = Tcl_GetString(objv[2]);
+    for (int i = 0; feats[i].name; i++) {
+        if (!strcmp(feats[i].name, q)) {
+            Tcl_SetObjResult(interp, Tcl_NewIntObj(feats[i].have));
+            return TCL_OK;
+        }
+    }
+    /* Unknown feature -> 0 (forwards-compatible: callers can probe future
+     * features without getting a Tcl error on older builds). */
+    Tcl_SetObjResult(interp, Tcl_NewIntObj(0));
+    return TCL_OK;
+}
+
 /* tclmcairo todata id -> bytearray ARGB32 */
 static int CairoToDataCmd(ClientData cd, Tcl_Interp *interp,
     int objc, Tcl_Obj *const objv[])
@@ -1075,6 +1179,178 @@ static int CairoToPpmCmd(ClientData cd, Tcl_Interp *interp,
     ckfree((char*)buf);
     return TCL_OK;
 }
+
+/* -------------------------------------------------------------- */
+/* image_from_ppm -- inverse of toppm                              */
+/*                                                                  */
+/* tclmcairo image_from_ppm id bytes x y                            */
+/*     ?-width w? ?-height h? ?-alpha a?                            */
+/*                                                                  */
+/* Accepts PPM P6 byte stream as produced by Tk's photo:            */
+/*     [$photo data -format ppm]                                    */
+/* Decodes the header, expands RGB24 to Cairo ARGB32, blits onto    */
+/* the context. Lets svg2cairo / canvas2cairo callers skip the      */
+/* tempfile + photo round-trip.                                     */
+/*                                                                  */
+/* PPM grammar accepted (simplified):                               */
+/*     P6 \s <width> \s <height> \s <maxval> \s <pixels...>          */
+/* Whitespace is any combination of space, tab, CR, LF.             */
+/* Comment lines starting with '#' are skipped (PPM spec).          */
+/* maxval must be 255 (we don't expand 16-bit PPM).                 */
+/* -------------------------------------------------------------- */
+static int CairoImageFromPpmCmd(ClientData cd, Tcl_Interp *interp,
+    int objc, Tcl_Obj *const objv[])
+{
+    (void)cd;
+    if (objc < 6) {
+        Tcl_WrongNumArgs(interp, 2, objv,
+            "id bytes x y ?-width w? ?-height h? ?-alpha a?");
+        return TCL_ERROR;
+    }
+    int id; GET_INT(interp, objv[2], id);
+    CairoCtx *c = ctx_find(id);
+    if (!c) { Tcl_SetResult(interp,"invalid id",TCL_STATIC); return TCL_ERROR; }
+
+    Tcl_Size blen;
+    const unsigned char *bdata = Tcl_GetByteArrayFromObj(objv[3], &blen);
+    if (!bdata || blen < 11) {
+        Tcl_SetResult(interp,"image_from_ppm: PPM data too short",TCL_STATIC);
+        return TCL_ERROR;
+    }
+
+    double x, y;
+    GET_DOUBLE(interp, objv[4], x);
+    GET_DOUBLE(interp, objv[5], y);
+
+    double dest_w = -1, dest_h = -1, alpha = 1.0;
+    for (int i = 6; i+1 < objc; i += 2) {
+        const char *k = Tcl_GetString(objv[i]);
+        if      (!strcmp(k,"-width"))  { GET_DOUBLE(interp,objv[i+1],dest_w); }
+        else if (!strcmp(k,"-height")) { GET_DOUBLE(interp,objv[i+1],dest_h); }
+        else if (!strcmp(k,"-alpha"))  { GET_DOUBLE(interp,objv[i+1],alpha);  }
+    }
+
+    /* --- Parse PPM header ----------------------------------------- */
+    /* Magic 'P6' */
+    if (bdata[0] != 'P' || bdata[1] != '6') {
+        Tcl_SetResult(interp,"image_from_ppm: not a PPM P6 stream",TCL_STATIC);
+        return TCL_ERROR;
+    }
+    size_t p = 2;
+
+    /* Helper to skip whitespace + comments */
+    #define PPM_SKIP_WS_AND_COMMENTS() do { \
+        while (p < (size_t)blen) { \
+            unsigned char ch = bdata[p]; \
+            if (ch==' ' || ch=='\t' || ch=='\r' || ch=='\n') { p++; continue; } \
+            if (ch == '#') { \
+                while (p < (size_t)blen && bdata[p] != '\n') p++; \
+                continue; \
+            } \
+            break; \
+        } \
+    } while (0)
+
+    /* Helper: read decimal int, advance p; returns -1 on parse error */
+    #define PPM_READ_INT(out) do { \
+        PPM_SKIP_WS_AND_COMMENTS(); \
+        if (p >= (size_t)blen || bdata[p] < '0' || bdata[p] > '9') { (out) = -1; break; } \
+        long _v = 0; \
+        while (p < (size_t)blen && bdata[p] >= '0' && bdata[p] <= '9') { \
+            _v = _v * 10 + (bdata[p] - '0'); \
+            p++; \
+            if (_v > 1000000000L) { (out) = -1; break; } \
+        } \
+        (out) = (int)_v; \
+    } while (0)
+
+    int pw = -1, ph = -1, maxval = -1;
+    PPM_READ_INT(pw);
+    PPM_READ_INT(ph);
+    PPM_READ_INT(maxval);
+
+    if (pw <= 0 || ph <= 0 || maxval <= 0) {
+        Tcl_SetResult(interp,
+            "image_from_ppm: malformed PPM header (need P6 W H maxval)",
+            TCL_STATIC);
+        return TCL_ERROR;
+    }
+    if (maxval != 255) {
+        Tcl_SetObjResult(interp, Tcl_ObjPrintf(
+            "image_from_ppm: only 8-bit PPM supported (maxval=255), got %d",
+            maxval));
+        return TCL_ERROR;
+    }
+
+    /* Single whitespace byte after maxval, then the raw pixels follow */
+    if (p >= (size_t)blen) {
+        Tcl_SetResult(interp,"image_from_ppm: header but no pixel data",
+                      TCL_STATIC);
+        return TCL_ERROR;
+    }
+    {
+        unsigned char ch = bdata[p];
+        if (ch==' ' || ch=='\t' || ch=='\r' || ch=='\n') p++;
+    }
+
+    size_t need = (size_t)pw * (size_t)ph * 3;
+    if ((size_t)blen - p < need) {
+        Tcl_SetObjResult(interp, Tcl_ObjPrintf(
+            "image_from_ppm: pixel data truncated (need %zu, have %zu)",
+            need, (size_t)blen - p));
+        return TCL_ERROR;
+    }
+    const unsigned char *pix = bdata + p;
+
+    /* --- Build Cairo image surface from RGB24 ---------------------- */
+    cairo_surface_t *img = cairo_image_surface_create(
+        CAIRO_FORMAT_RGB24, pw, ph);
+    if (!img || cairo_surface_status(img) != CAIRO_STATUS_SUCCESS) {
+        const char *err_msg = img ?
+            cairo_status_to_string(cairo_surface_status(img)) :
+            "cannot allocate Cairo surface";
+        Tcl_SetObjResult(interp, Tcl_ObjPrintf("%s", err_msg));
+        if (img) cairo_surface_destroy(img);
+        return TCL_ERROR;
+    }
+    unsigned char *dst = cairo_image_surface_get_data(img);
+    int dst_stride = cairo_image_surface_get_stride(img);
+
+    /* RGB24 PPM (R G B) -> Cairo ARGB32-style (B G R 0xFF for RGB24) */
+    for (int row = 0; row < ph; row++) {
+        unsigned char *d = dst + row * dst_stride;
+        const unsigned char *s = pix + (size_t)row * (size_t)pw * 3;
+        for (int col = 0; col < pw; col++) {
+            /* Cairo little-endian byte order: B G R A */
+            d[0] = s[2]; /* B */
+            d[1] = s[1]; /* G */
+            d[2] = s[0]; /* R */
+            d[3] = 0xFF; /* unused for RGB24, filled for cleanliness */
+            d += 4;
+            s += 3;
+        }
+    }
+    cairo_surface_mark_dirty(img);
+
+    #undef PPM_SKIP_WS_AND_COMMENTS
+    #undef PPM_READ_INT
+
+    /* --- Blit onto context ----------------------------------------- */
+    cairo_save(c->cr);
+    cairo_translate(c->cr, x, y);
+    if (dest_w > 0 || dest_h > 0) {
+        double sw = (dest_w > 0) ? dest_w/pw : dest_h/ph;
+        double sh = (dest_h > 0) ? dest_h/ph : sw;
+        if (dest_w > 0 && dest_h > 0) { sw = dest_w/pw; sh = dest_h/ph; }
+        cairo_scale(c->cr, sw, sh);
+    }
+    cairo_set_source_surface(c->cr, img, 0, 0);
+    cairo_paint_with_alpha(c->cr, alpha);
+    cairo_restore(c->cr);
+    cairo_surface_destroy(img);
+    return TCL_OK;
+}
+
 
 /* Cairo write callback for channel output */
 static cairo_status_t _cairo_write_to_channel(void *closure,
@@ -3583,7 +3859,7 @@ static int TkmCairoCmd(ClientData cd, Tcl_Interp *interp,
 {
     if (objc < 2) {
         Tcl_WrongNumArgs(interp, 1, objv,
-            "create|destroy|clear|save|size|todata|newpage|finish|image_size|image_load|image_blit|image_free|image_info|select_font_face|svg_file|svg_data|svg_file_luna|svg_data_luna|svg_size_luna|"
+            "create|destroy|clear|save|size|todata|newpage|finish|hasFeature|image_size|image_load|image_blit|image_free|image_info|image_from_ppm|select_font_face|svg_file|svg_data|svg_file_luna|svg_data_luna|svg_size_luna|"
             "push|pop|clip_rect|clip_path|clip_reset|"
             "image|rect|line|circle|ellipse|arc|poly|path|text|text_path|"
             "font_measure|transform|gradient_linear|gradient_radial ...");
@@ -3597,10 +3873,12 @@ static int TkmCairoCmd(ClientData cd, Tcl_Interp *interp,
     else if (!strcmp(sub,"destroy"))          return CairoDestroyCmd(cd,interp,objc,objv);
     else if (!strcmp(sub,"clear"))            return CairoClearCmd(cd,interp,objc,objv);
     else if (!strcmp(sub,"size"))             return CairoSizeCmd(cd,interp,objc,objv);
+    else if (!strcmp(sub,"hasFeature"))       return CairoHasFeatureCmd(cd,interp,objc,objv);
     else if (!strcmp(sub,"todata"))           return CairoToDataCmd(cd,interp,objc,objv);
     else if (!strcmp(sub,"topng"))            return CairoToPngCmd(cd,interp,objc,objv);
     else if (!strcmp(sub,"toppm"))            return CairoToPpmCmd(cd,interp,objc,objv);
     else if (!strcmp(sub,"image_data"))       return CairoImageDataCmd(cd,interp,objc,objv);
+    else if (!strcmp(sub,"image_from_ppm"))   return CairoImageFromPpmCmd(cd,interp,objc,objv);
     else if (!strcmp(sub,"save"))             return CairoSaveCmd(cd,interp,objc,objv);
     else if (!strcmp(sub,"newpage"))          return CairoNewPageCmd(cd,interp,objc,objv);
     else if (!strcmp(sub,"finish"))           return CairoFinishCmd(cd,interp,objc,objv);

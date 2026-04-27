@@ -601,15 +601,21 @@ test text_extents-2.1 {text_extents values are numeric} -body {
 # image_size
 # ================================================================
 test image_size-1.0 {image_size returns width height for PNG} -body {
-    # Use one of the demo PNGs as test image
-    set testimg [file normalize [file join [file dirname [info script]] ../demos/demo-blit-icons.png]]
-    if {![file exists $testimg]} {
-        return "skip"
-    }
+    # Generate a small PNG on the fly so the test doesn't depend on demos/
+    set testimg [tmpfile png]
+    set src [tclmcairo::new 64 48]
+    $src clear 1 1 1
+    $src rect 0 0 64 48 -fill {0.2 0.5 0.9}
+    $src save $testimg
+    $src destroy
+
     set ctx [tclmcairo::new 10 10]
     set result [$ctx image_size $testimg]
     $ctx destroy
-    expr {[llength $result] == 2 && [lindex $result 0] > 0 && [lindex $result 1] > 0}
+    cleanup $testimg
+    expr {[llength $result] == 2 \
+          && [lindex $result 0] == 64 \
+          && [lindex $result 1] == 48}
 } -result 1
 
 test image_size-1.1 {image_size bad file -> error} -body {
@@ -1854,9 +1860,9 @@ test lowlevel-1.16 {rel_move_to moves current point} -body {
 # ================================================================
 
 # Fix 1: package version consistency
-test robustness-1.0 {package version is 0.3.5} -body {
+test robustness-1.0 {package version is 0.3.6} -body {
     package present tclmcairo
-} -result 0.3.5
+} -result 0.3.6
 
 # Fix 5: low-level commands check argument count
 test robustness-1.1 {move_to requires x y} -body {
@@ -2119,6 +2125,209 @@ test image_load-1.7 {image_blit with -alpha} -body {
     $ctx save $f
     set ok [expr {[file exists $f] && [file size $f] > 200}]
     $ctx destroy; cleanup $f; set ok
+} -result 1
+
+# ================================================================
+# hasFeature
+# ================================================================
+
+test hasFeature-1.0 {list returns non-empty} -body {
+    set f [tclmcairo hasFeature]
+    expr {[llength $f] > 0}
+} -result 1
+
+test hasFeature-1.1 {list contains image_load} -body {
+    expr {"image_load" in [tclmcairo hasFeature]}
+} -result 1
+
+test hasFeature-1.2 {list contains svg_file} -body {
+    expr {"svg_file" in [tclmcairo hasFeature]}
+} -result 1
+
+test hasFeature-1.3 {known feature returns 1} -body {
+    tclmcairo hasFeature image_load
+} -result 1
+
+test hasFeature-1.4 {known feature toppm returns 1} -body {
+    tclmcairo hasFeature toppm
+} -result 1
+
+test hasFeature-1.5 {unknown feature returns 0} -body {
+    tclmcairo hasFeature this_does_not_exist
+} -result 0
+
+test hasFeature-1.6 {empty string returns 0} -body {
+    tclmcairo hasFeature ""
+} -result 0
+
+test hasFeature-1.7 {OO-style helper works} -body {
+    tclmcairo::hasFeature image_load
+} -result 1
+
+test hasFeature-1.8 {OO-style without arg returns list} -body {
+    expr {[llength [tclmcairo::hasFeature]] > 0}
+} -result 1
+
+test hasFeature-1.9 {lunasvg or no lunasvg, both ok} -body {
+    set v [tclmcairo hasFeature lunasvg]
+    expr {$v == 0 || $v == 1}
+} -result 1
+
+test hasFeature-1.10 {jpeg or no jpeg, both ok} -body {
+    set v [tclmcairo hasFeature jpeg]
+    expr {$v == 0 || $v == 1}
+} -result 1
+
+test hasFeature-1.11 {too many args is error} -body {
+    catch {tclmcairo hasFeature a b} err
+    string match "*?name?*" $err
+} -result 1
+
+# ================================================================
+# image_from_ppm  (v0.3.6) — inverse of toppm
+# ================================================================
+
+# Helper: render a known-color image, return the PPM bytes
+proc ppm_red_box {} {
+    set ctx [tclmcairo::new 8 6]
+    $ctx clear 1 0 0 1
+    set bytes [$ctx toppm]
+    $ctx destroy
+    return $bytes
+}
+
+test image_from_ppm-1.0 {round-trip toppm -> image_from_ppm preserves color} -body {
+    set ppm [ppm_red_box]
+    set ctx [tclmcairo::new 8 6]
+    $ctx clear 1 1 1 1
+    $ctx image_from_ppm $ppm 0 0
+    set raw [$ctx todata]
+    $ctx destroy
+    # Cairo ARGB32 little-endian: byte order B G R A.
+    # First pixel of a red image: B=0 G=0 R=255 A=255.
+    set b [scan [string index $raw 0] %c]
+    set g [scan [string index $raw 1] %c]
+    set r [scan [string index $raw 2] %c]
+    list $b $g $r
+} -result {0 0 255}
+
+test image_from_ppm-1.1 {bad magic -> error} -body {
+    set ctx [tclmcairo::new 8 6]
+    set err ""
+    catch { $ctx image_from_ppm "P3 8 6 255\nABC" 0 0 } err
+    $ctx destroy
+    string match "*P6*" $err
+} -result 1
+
+test image_from_ppm-1.2 {short data -> error} -body {
+    set ctx [tclmcairo::new 8 6]
+    set err ""
+    catch { $ctx image_from_ppm "P6" 0 0 } err
+    $ctx destroy
+    expr {[string length $err] > 0}
+} -result 1
+
+test image_from_ppm-1.3 {16-bit PPM rejected} -body {
+    # P6 4 1 65535\n + 24 bytes (would be valid 16-bit) -- we reject
+    set ctx [tclmcairo::new 8 6]
+    set blob "P6\n4 1\n65535\n[string repeat \x00 24]"
+    set err ""
+    catch { $ctx image_from_ppm $blob 0 0 } err
+    $ctx destroy
+    string match "*8-bit*" $err
+} -result 1
+
+test image_from_ppm-1.4 {truncated pixel data -> error} -body {
+    # Header says 4x1 = 12 bytes, but we provide only 3
+    set ctx [tclmcairo::new 8 6]
+    set blob "P6\n4 1\n255\nABC"
+    set err ""
+    catch { $ctx image_from_ppm $blob 0 0 } err
+    $ctx destroy
+    string match "*truncated*" $err
+} -result 1
+
+test image_from_ppm-1.5 {comments in PPM header are skipped} -body {
+    # PPM with comments between fields
+    set blob "P6\n# author: tclmcairo test\n2 2\n# maxval next\n255\n"
+    # 2x2 = 12 bytes of pixel data, all blue (R=0,G=0,B=255)
+    append blob [binary format c* {0 0 255 0 0 255 0 0 255 0 0 255}]
+    set ctx [tclmcairo::new 4 4]
+    $ctx clear 1 1 1 1
+    set ok [expr {![catch {$ctx image_from_ppm $blob 0 0}]}]
+    $ctx destroy
+    set ok
+} -result 1
+
+test image_from_ppm-1.6 {scaling with -width works} -body {
+    set ppm [ppm_red_box]    ;# 8x6 red
+    set f [tmpfile png]
+    set ctx [tclmcairo::new 32 24]
+    $ctx clear 1 1 1 1
+    $ctx image_from_ppm $ppm 0 0 -width 32 -height 24
+    $ctx save $f
+    set ok [expr {[file exists $f] && [file size $f] > 100}]
+    $ctx destroy; cleanup $f
+    set ok
+} -result 1
+
+test image_from_ppm-1.7 {hasFeature reports image_from_ppm} -body {
+    tclmcairo hasFeature image_from_ppm
+} -result 1
+
+test image_from_ppm-1.8 {OO method works} -body {
+    set ppm [ppm_red_box]
+    set ctx [tclmcairo::new 8 6]
+    $ctx clear 1 1 1 1
+    $ctx image_from_ppm $ppm 0 0
+    set sz [$ctx size]
+    $ctx destroy
+    set sz
+} -result {8 6}
+
+# ================================================================
+# locate (v0.3.6) — find install paths of tclmcairo and companions
+# ================================================================
+
+test locate-1.0 {locate without arg returns directory} -body {
+    set p [tclmcairo::locate]
+    expr {$p ne "" && [file isdirectory $p]}
+} -result 1
+
+test locate-1.1 {locate tclmcairo same as no-arg} -body {
+    set a [tclmcairo::locate]
+    set b [tclmcairo::locate tclmcairo]
+    string equal $a $b
+} -result 1
+
+test locate-1.2 {locate svg2cairo finds .tm file or returns ""} -body {
+    set p [tclmcairo::locate svg2cairo]
+    # Either: not installed -> ""  OR  installed -> path to .tm
+    expr {$p eq "" || ([file exists $p] && [string match "*svg2cairo*" $p])}
+} -result 1
+
+test locate-1.3 {locate canvas2cairo finds .tm file or returns ""} -body {
+    set p [tclmcairo::locate canvas2cairo]
+    expr {$p eq "" || ([file exists $p] && [string match "*canvas2cairo*" $p])}
+} -result 1
+
+test locate-1.4 {locate -all returns dict with all entries} -body {
+    set d [tclmcairo::locate -all]
+    expr {[dict exists $d tclmcairo]
+          && [dict exists $d canvas2cairo]
+          && [dict exists $d svg2cairo]
+          && [dict exists $d shape_renderer]}
+} -result 1
+
+test locate-1.5 {locate of unknown module returns ""} -body {
+    tclmcairo::locate this_module_does_not_exist
+} -result ""
+
+test locate-1.6 {locate result is normalized path or empty} -body {
+    set p [tclmcairo::locate]
+    if {$p eq ""} { return "skip-empty" }
+    # The dir should exist and contain libtclmcairo* or our .tm
+    expr {[file isdirectory $p]}
 } -result 1
 
 # ================================================================

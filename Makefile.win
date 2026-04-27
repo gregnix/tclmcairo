@@ -24,7 +24,7 @@
 #   make -f Makefile.win clean
 
 PACKAGE_NAME    = tclmcairo
-PACKAGE_VERSION = 0.3.4
+PACKAGE_VERSION = 0.3.6
 TARGET          ?= mingw-ucrt64
 TCLSH           ?= tclsh
 

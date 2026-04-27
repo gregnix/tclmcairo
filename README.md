@@ -3,7 +3,7 @@
 A lightweight Cairo binding for Tcl — no Tk required.
 Runs in `tclsh`. Outputs PNG, PDF, SVG, PS, EPS.
 
-**Version:** 0.3.5 · **License:** BSD · **Tcl:** 8.6 / 9.0  
+**Version:** 0.3.6 · **License:** BSD · **Tcl:** 8.6 / 9.0  
 **Platform:** Linux, Windows (MSYS2 MINGW64, BAWT 3.2), macOS  
 **Tests:** 201/201 (Linux tclmcairo) · 67/67 (Linux canvas2cairo) · 193/193 (Windows)
 
@@ -175,7 +175,7 @@ REM with lunasvg:
 set LUNASVG_DIR=C:\msys64\home\greg\src\lunasvg
 build-win.bat 86
 
-xcopy /e /i /y dist\tclmcairo0.3.5 C:\Tcl\lib\tclmcairo0.3.5
+xcopy /e /i /y dist\tclmcairo0.3.6 C:\Tcl\lib\tclmcairo0.3.6
 test-win.bat 86
 ```
 

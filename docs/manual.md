@@ -2,7 +2,7 @@
 
 Cairo 2D graphics for Tcl. No Tk required. Runs in `tclsh`.
 
-**Version:** 0.3.5 · **License:** BSD · **Tcl:** 8.6 / 9.0  
+**Version:** 0.3.6 · **License:** BSD · **Tcl:** 8.6 / 9.0  
 **Platform:** Linux, Windows (MSYS2, BAWT), macOS  
 **Repository:** https://github.com/gregnix/tclmcairo
 
@@ -66,7 +66,7 @@ REM mit lunasvg:
 set LUNASVG_DIR=C:\msys64\home\greg\src\lunasvg
 build-win.bat 86
 
-xcopy /e /i /y dist\tclmcairo0.3.4 C:\Tcl\lib\tclmcairo0.3.4
+xcopy /e /i /y dist\tclmcairo0.3.6 C:\Tcl\lib\tclmcairo0.3.6
 test-win.bat 86
 ```
 

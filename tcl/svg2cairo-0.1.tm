@@ -18,6 +18,9 @@
 #   svg2cairo::render      $ctx filename ?options?
 #   svg2cairo::render_data $ctx svgstring ?options?
 #   svg2cairo::size        filename   -> {width height}
+#   svg2cairo::size_data   svgstring  -> {width height}            (0.3.6)
+#   svg2cairo::sizeForFit  filename maxW maxH ?-min m? ?-max m?    (0.3.6)
+#                          -> {targetW targetH scale}
 #   svg2cairo::has_text    filename   -> 0|1
 #
 # Optionen für render/render_data:
@@ -43,7 +46,7 @@ package provide svg2cairo 0.1
 package require tclmcairo
 
 namespace eval ::svg2cairo {
-    namespace export render render_data size has_text
+    namespace export render render_data size size_data sizeForFit has_text
 }
 
 # ================================================================
@@ -698,6 +701,65 @@ proc ::svg2cairo::size {filename} {
     if {$w <= 0} { set w 100 }
     if {$h <= 0} { set h 100 }
     list $w $h
+}
+
+# ----------------------------------------------------------------
+# size_data — like size but for an in-memory SVG string
+# (matches render/render_data naming convention)
+# ----------------------------------------------------------------
+proc ::svg2cairo::size_data {svgdata} {
+    set svgdata [regsub {<!DOCTYPE[^>]*>} $svgdata ""]
+    if {[catch {set doc [dom parse $svgdata]}]} {
+        if {[regexp {width=['"]([0-9.]+)} $svgdata -> w] &&
+            [regexp {height=['"]([0-9.]+)} $svgdata -> h]} {
+            return [list $w $h]
+        }
+        return {100 100}
+    }
+    set root [$doc documentElement]
+    set w [_attrNum $root width  0]
+    set h [_attrNum $root height 0]
+    if {$w == 0 || $h == 0} {
+        set vb [$root getAttribute viewBox ""]
+        if {$vb ne ""} {
+            lassign $vb _ _ w h
+        }
+    }
+    $doc delete
+    if {$w <= 0} { set w 100 }
+    if {$h <= 0} { set h 100 }
+    list $w $h
+}
+
+# ----------------------------------------------------------------
+# sizeForFit — compute target {w h scale} for fit-to-box rendering
+#
+# Common pattern when an editor needs to drop an SVG into a canvas
+# at a "reasonable" size — clamped between -min and -max scale to
+# avoid degenerate results from quirky SVGs.
+#
+# Usage:
+#   lassign [svg2cairo::sizeForFit $svgFile $maxW $maxH]      tw th s
+#   lassign [svg2cairo::sizeForFit $svgFile $maxW $maxH \
+#               -min 0.5 -max 4.0]                            tw th s
+#
+# Returns: {targetW targetH scale}
+# ----------------------------------------------------------------
+proc ::svg2cairo::sizeForFit {filename maxW maxH args} {
+    array set opts { -min 0.5 -max 2.0 }
+    foreach {k v} $args { set opts($k) $v }
+
+    lassign [size $filename] origW origH
+    if {$origW <= 0} { set origW 100 }
+    if {$origH <= 0} { set origH 100 }
+
+    set scale [expr {min(double($maxW)/$origW, double($maxH)/$origH)}]
+    if {$scale > $opts(-max)} { set scale $opts(-max) }
+    if {$scale < $opts(-min)} { set scale $opts(-min) }
+
+    set targetW [expr {int($origW * $scale)}]
+    set targetH [expr {int($origH * $scale)}]
+    list $targetW $targetH $scale
 }
 
 proc ::svg2cairo::has_text {filename} {

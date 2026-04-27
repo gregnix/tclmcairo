@@ -116,6 +116,14 @@ install-libraries:
 test: all
 	TCLMCAIRO_LIBDIR=. $(TCLSH) tests/test-tclmcairo.tcl
 
+test-canvas2cairo: all
+	TCLMCAIRO_LIBDIR=. $(TCLSH) tests/test-canvas2cairo.tcl
+
+test-svg2cairo: all
+	TCLMCAIRO_LIBDIR=. $(TCLSH) tests/test-svg2cairo.tcl
+
+test-all: test test-canvas2cairo test-svg2cairo
+
 demo: all
 	TCLMCAIRO_LIBDIR=. $(TCLSH) demos/demo-tclmcairo.tcl
 
@@ -127,6 +135,19 @@ zip: distclean
 	cd .. && zip -r tclmcairo_$(PACKAGE_VERSION).zip tclmcairo/ \
 	    --exclude "*.git*" --exclude "*.bak" --exclude "*.o"
 	@echo "Created: ../tclmcairo_$(PACKAGE_VERSION).zip"
+
+# release-zip: clean source archive via git, no .git, no build artefacts.
+# Use this for public releases. Requires the working tree to be a git
+# checkout with the desired commit checked out.
+release-zip:
+	@if [ ! -d .git ]; then \
+	    echo "ERROR: not a git checkout — fall back to 'make zip'"; \
+	    exit 1; \
+	fi
+	git archive --format=zip --prefix=tclmcairo-$(PACKAGE_VERSION)/ \
+	    -o ../tclmcairo-$(PACKAGE_VERSION).zip HEAD
+	@echo "Created: ../tclmcairo-$(PACKAGE_VERSION).zip (git archive)"
+	@unzip -l ../tclmcairo-$(PACKAGE_VERSION).zip | tail -3
 
 # ================================================================
 # Clean

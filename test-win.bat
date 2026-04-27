@@ -8,7 +8,7 @@ REM
 REM Voraussetzung: build-win.bat muss zuerst gelaufen sein.
 REM Testet aus dist\tclmcairo%VERSION%\ heraus (DLLs dort verfuegbar).
 
-set VERSION=0.3.4
+set VERSION=0.3.6
 set TCL_VER=%1
 if "%TCL_VER%"=="" set TCL_VER=86
 
@@ -32,7 +32,7 @@ if not exist "%TCLSH%" (
 )
 
 REM DLLs aus dist\ in PATH (fuer Cairo-Abhaengigkeiten)
-REM TCLMCAIRO_LIBDIR damit tclmcairo-0.3.4.tm die DLL findet
+REM TCLMCAIRO_LIBDIR damit tclmcairo-0.3.6.tm die DLL findet
 set DIST_ABS=%CD%\%DIST%
 set PATH=%DIST_ABS%;%TCLBIN%;%PATH%
 set TCLMCAIRO_LIBDIR=%DIST_ABS%

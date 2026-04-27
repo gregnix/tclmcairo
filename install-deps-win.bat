@@ -76,4 +76,4 @@ echo.
 echo === Fertig: %COPIED% kopiert, %SKIPPED% bereits vorhanden ===
 echo.
 echo Test:
-echo   tclsh -e "load {%DEST%\..\lib\tclmcairo0.3.3\tclmcairo.dll}; puts OK"
+echo   tclsh -e "load {%DEST%\..\lib\tclmcairo0.3.6\tclmcairo.dll}; puts OK"

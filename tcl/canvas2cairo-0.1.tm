@@ -21,7 +21,362 @@ unset -nocomplain _c2c_err
 
 namespace eval canvas2cairo {
 
-namespace export export render
+namespace export export render ready probe svgItem svgResize svgItemDelete
+
+# ================================================================
+# ready / probe — capability checks for consumers
+# ================================================================
+#
+# Replaces the 60-line "is everything actually working?" dance that
+# editors typically write before their first export call. Consumers
+# can now do:
+#
+#   if {![canvas2cairo::ready]} { error "canvas2cairo not usable" }
+#
+# or for diagnostics:
+#
+#   array set info [canvas2cairo::probe]
+#   puts $info(status)        ;# ok | not-installed | tk-required | ...
+#   puts $info(tclmcairo)     ;# version of tclmcairo (or "")
+#   puts $info(canvas2cairo)  ;# our own version
+#
+
+# Quick yes/no probe — does NOT execute an actual export, just checks
+# that all required components are loadable.
+proc ready {} {
+    set d [probe]
+    expr {[dict get $d status] eq "ok"}
+}
+
+# Detail dict — meant for logging / diagnostics. Returns:
+#   status         ok | tclmcairo-missing | tk-missing | error
+#   tclmcairo      package version of tclmcairo (or "")
+#   canvas2cairo   our own version
+#   tk             1 if Tk is loaded, 0 otherwise
+#   features       list of tclmcairo features available
+#   message        human-readable status sentence
+#
+# Optionally: pass -test to additionally run a tiny canvas->PNG
+# round-trip and verify the bytes are a real PNG. Default is no.
+proc probe {args} {
+    array set opts {-test 0}
+    foreach {k v} $args {
+        if {$k eq "-test"} { set opts(-test) $v }
+    }
+
+    set out [dict create \
+        status        "" \
+        tclmcairo     "" \
+        canvas2cairo  [package provide canvas2cairo] \
+        tk            0 \
+        features      {} \
+        message       ""]
+
+    # tclmcairo loadable?
+    if {[catch {set v [package require tclmcairo]} err]} {
+        dict set out status   "tclmcairo-missing"
+        dict set out message  "tclmcairo not loadable: $err"
+        return $out
+    }
+    dict set out tclmcairo $v
+
+    if {[catch {set feats [tclmcairo hasFeature]}]} {
+        # Older tclmcairo without hasFeature — that's still ok, we just
+        # report an empty feature list.
+        set feats {}
+    }
+    dict set out features $feats
+
+    # Tk loadable? Required for actually using canvas2cairo, but we
+    # don't force-load it here — just check whether it's already there.
+    dict set out tk [expr {[info commands ::tk] ne ""}]
+
+    if {!$opts(-test)} {
+        if {[dict get $out tk]} {
+            dict set out status  ok
+            dict set out message "ready"
+        } else {
+            dict set out status  tk-missing
+            dict set out message "Tk not loaded — load it before calling export"
+        }
+        return $out
+    }
+
+    # -test mode: actually do a tiny export and verify the output
+    if {![dict get $out tk]} {
+        dict set out status  tk-missing
+        dict set out message "Tk not loaded — cannot run -test probe"
+        return $out
+    }
+    if {[catch {_test_export} err]} {
+        dict set out status  error
+        dict set out message "test export failed: $err"
+        return $out
+    }
+    dict set out status  ok
+    dict set out message "ready (test export ok)"
+    return $out
+}
+
+# Internal: tiny round-trip test
+proc _test_export {} {
+    set probe_canvas .canvas2cairo_probe_[clock microseconds]
+    canvas $probe_canvas -width 10 -height 10
+    $probe_canvas create rectangle 1 1 9 9 -fill red
+
+    set tmpf [file join /tmp _c2c_probe_[pid]_[clock microseconds].png]
+    set ok 0
+    if {[catch {export $probe_canvas $tmpf}]} {
+        destroy $probe_canvas
+        catch {file delete -force $tmpf}
+        error "export call failed"
+    }
+    if {[file exists $tmpf] && [file size $tmpf] > 8} {
+        # Validate PNG signature: 89 50 4E 47 0D 0A 1A 0A
+        set fh [open $tmpf rb]
+        fconfigure $fh -translation binary
+        set sig [read $fh 8]
+        close $fh
+        binary scan $sig H16 hex
+        if {$hex eq "89504e470d0a1a0a"} { set ok 1 }
+    }
+    destroy $probe_canvas
+    catch {file delete -force $tmpf}
+    if {!$ok} { error "output is not a valid PNG" }
+    return 1
+}
+
+# ================================================================
+# svgItem — high-level "drop SVG onto canvas" helper
+# ================================================================
+#
+# Replaces the boilerplate that editors like labeledit had to write to
+# put an SVG into a canvas at a chosen size:
+#
+#   * load the SVG file
+#   * compute target size (with min/max clamping)
+#   * render via tclmcairo + svg2cairo (or lunasvg)
+#   * convert to a Tk photo
+#   * create a canvas image item
+#   * remember the SVG path so the item can be re-rendered on resize
+#
+# All of that in one call:
+#
+#   set itemId [canvas2cairo::svgItem $canvas $x $y $svgFile]
+#   set itemId [canvas2cairo::svgItem $canvas $x $y $svgFile \
+#                   -size {200 150} -tags {svg user1} -anchor center]
+#
+# Re-render the same item at a new size (e.g. on resize-handle drag):
+#
+#   canvas2cairo::svgResize $canvas $itemId -size {400 300}
+#
+# Options:
+#   -size    {w h}         target size in pixels
+#                          omit to use SVG's own w/h, capped to -maxsize
+#   -maxsize {w h}         clamp box (default {1200 1200})
+#   -minscale n            min zoom factor (default 0.5)
+#   -maxscale n            max zoom factor (default 2.0)
+#   -anchor  nw|n|ne|w|center|e|sw|s|se   default nw
+#   -tags    {t1 t2 ...}   extra canvas tags
+#   -renderer auto|nano|luna  default auto (luna if available)
+#
+# Returns: canvas item id (an integer)
+#
+# Internally caches the Tk photo on the item via -image. The SVG path
+# and last render parameters are stored as canvas item properties so
+# svgResize can reproduce the rendering with a different size.
+# ----------------------------------------------------------------
+
+# Per-item state stored as canvas itemcget {-tags} convention is too
+# fragile (tags get mutated by users). We use a private array keyed by
+# {canvas:itemId}.
+variable _svgItemState
+
+proc svgItem {canvas x y svgFile args} {
+    variable _svgItemState
+
+    array set opts {
+        -size      {}
+        -maxsize   {1200 1200}
+        -minscale  0.5
+        -maxscale  2.0
+        -anchor    nw
+        -tags      {}
+        -renderer  auto
+    }
+    foreach {k v} $args { set opts($k) $v }
+
+    # Compute target size
+    if {[llength $opts(-size)] == 2} {
+        lassign $opts(-size) targetW targetH
+    } else {
+        # Use sizeForFit against -maxsize
+        if {[catch {package require svg2cairo}]} {
+            error "canvas2cairo::svgItem requires svg2cairo"
+        }
+        lassign $opts(-maxsize) maxW maxH
+        lassign [svg2cairo::sizeForFit $svgFile $maxW $maxH \
+                    -min $opts(-minscale) -max $opts(-maxscale)] \
+                targetW targetH _scale
+    }
+
+    # Render SVG -> Tk photo (no temp file when image_from_ppm available)
+    set photo [_svgRenderToPhoto $svgFile $targetW $targetH $opts(-renderer)]
+
+    # Create canvas image item
+    set itemId [$canvas create image $x $y \
+                    -image $photo \
+                    -anchor $opts(-anchor) \
+                    -tags $opts(-tags)]
+
+    # Remember state for svgResize
+    set key "$canvas:$itemId"
+    set _svgItemState($key) [dict create \
+        svgFile  $svgFile \
+        photo    $photo \
+        renderer $opts(-renderer) \
+        targetW  $targetW \
+        targetH  $targetH \
+        anchor   $opts(-anchor)]
+
+    # Tk canvas items have NO destroy event, so we cannot bind cleanup
+    # per item. Instead we listen for the canvas widget itself being
+    # destroyed and clean up all svgItems for that canvas at once.
+    # The bind tag is unique per canvas, idempotent if called twice.
+    set bindings [bind $canvas <Destroy>]
+    if {[string first "::canvas2cairo::_svgCanvasGone" $bindings] < 0} {
+        bind $canvas <Destroy> +[list ::canvas2cairo::_svgCanvasGone %W]
+    }
+
+    return $itemId
+}
+
+# Explicit item teardown — call before "$canvas delete $itemId" if the
+# Tk photo associated with the item should be released eagerly.
+# Otherwise photos linger until the canvas itself is destroyed.
+proc svgItemDelete {canvas itemId} {
+    variable _svgItemState
+    set key "$canvas:$itemId"
+    if {[info exists _svgItemState($key)]} {
+        catch {image delete [dict get $_svgItemState($key) photo]}
+        unset _svgItemState($key)
+    }
+    catch {$canvas delete $itemId}
+    return
+}
+
+proc svgResize {canvas itemId args} {
+    variable _svgItemState
+    set key "$canvas:$itemId"
+    if {![info exists _svgItemState($key)]} {
+        error "canvas2cairo::svgResize: item $itemId is not an svgItem"
+    }
+    set state $_svgItemState($key)
+
+    array set opts {
+        -size {}
+        -maxsize {}
+        -minscale 0.5
+        -maxscale 2.0
+    }
+    foreach {k v} $args { set opts($k) $v }
+
+    set svgFile  [dict get $state svgFile]
+    set renderer [dict get $state renderer]
+    set oldPhoto [dict get $state photo]
+
+    if {[llength $opts(-size)] == 2} {
+        lassign $opts(-size) targetW targetH
+    } elseif {[llength $opts(-maxsize)] == 2} {
+        lassign $opts(-maxsize) maxW maxH
+        lassign [svg2cairo::sizeForFit $svgFile $maxW $maxH \
+                    -min $opts(-minscale) -max $opts(-maxscale)] \
+                targetW targetH _scale
+    } else {
+        error "svgResize requires -size or -maxsize"
+    }
+
+    # Render new photo, swap on the item, free old photo
+    set newPhoto [_svgRenderToPhoto $svgFile $targetW $targetH $renderer]
+    $canvas itemconfigure $itemId -image $newPhoto
+    catch {image delete $oldPhoto}
+
+    dict set state photo   $newPhoto
+    dict set state targetW $targetW
+    dict set state targetH $targetH
+    set _svgItemState($key) $state
+    return $itemId
+}
+
+# Internal: render SVG file to a fresh Tk photo image.
+# Uses image_from_ppm round-trip when available (no tempfile),
+# otherwise falls back to a tempfile PNG. Renderer choice:
+# auto picks lunasvg when compiled in.
+proc _svgRenderToPhoto {svgFile targetW targetH renderer} {
+    package require tclmcairo
+    if {[catch {package require Tk}]} {
+        error "canvas2cairo::svgItem needs Tk for the photo image"
+    }
+
+    set ctx [tclmcairo::new $targetW $targetH]
+    $ctx clear 1 1 1 0     ;# transparent background
+
+    # Figure out renderer
+    set use_luna 0
+    switch $renderer {
+        luna {
+            if {![tclmcairo hasFeature lunasvg]} {
+                $ctx destroy
+                error "lunasvg renderer requested but tclmcairo built without HAVE_LUNASVG"
+            }
+            set use_luna 1
+        }
+        nano { set use_luna 0 }
+        auto -
+        default {
+            set use_luna [tclmcairo hasFeature lunasvg]
+        }
+    }
+
+    if {$use_luna} {
+        # lunasvg is fully compliant — use directly
+        $ctx svg_file_luna $svgFile 0 0 -width $targetW -height $targetH
+    } else {
+        # Fall back to nanosvg via svg2cairo (covers <text>, CSS, etc.)
+        if {[catch {package require svg2cairo}]} {
+            $ctx destroy
+            error "no usable SVG renderer (need lunasvg or svg2cairo)"
+        }
+        svg2cairo::render $ctx $svgFile -width $targetW -height $targetH
+    }
+
+    # Cairo -> Tk photo: use image_from_ppm round-trip when available,
+    # otherwise fall back to PNG via tempfile.
+    set photo [image create photo -width $targetW -height $targetH]
+
+    if {[tclmcairo hasFeature toppm]
+        && [tclmcairo hasFeature image_from_ppm]} {
+        # In-memory round-trip — preferred
+        $photo put [$ctx toppm] -format ppm
+    } else {
+        set tmpf [file join /tmp _c2c_svgitem_[pid]_[clock microseconds].png]
+        $ctx save $tmpf
+        $photo read $tmpf -format png
+        catch {file delete -force $tmpf}
+    }
+    $ctx destroy
+    return $photo
+}
+
+# Internal: canvas widget got destroyed -> drop all our state for it
+proc _svgCanvasGone {canvas} {
+    variable _svgItemState
+    set prefix "$canvas:"
+    foreach k [array names _svgItemState ${prefix}*] {
+        catch {image delete [dict get $_svgItemState($k) photo]}
+        unset _svgItemState($k)
+    }
+}
 
 # ================================================================
 # Public API
@@ -44,13 +399,15 @@ proc export {canvas args} {
     set bg_override ""
     set chan_out    ""
     set chan_fmt    "pdf"
+    set exclude_tags {}
     foreach {k v} $args {
         switch $k {
-            -scale      { set scale [expr {double($v)}] }
-            -viewport   { set viewport $v }
-            -background { set bg_override $v }
-            -chan        { set chan_out $v }
-            -format     { set chan_fmt $v }
+            -scale         { set scale [expr {double($v)}] }
+            -viewport      { set viewport $v }
+            -background    { set bg_override $v }
+            -chan          { set chan_out $v }
+            -format        { set chan_fmt $v }
+            -exclude-tags  { set exclude_tags $v }
         }
     }
 
@@ -63,7 +420,7 @@ proc export {canvas args} {
         if {[catch {fconfigure $chan_out -translation binary} err]} {
             error "canvas2cairo: cannot set binary mode on channel: $err"
         }
-        _export_chan $canvas $chan_out $chan_fmt $scale $viewport
+        _export_chan $canvas $chan_out $chan_fmt $scale $viewport $exclude_tags
         return
     }
 
@@ -128,20 +485,20 @@ proc export {canvas args} {
     if {$mode eq "png"} {
         set ctx [tclmcairo::new $out_w $out_h]
         $ctx clear 1 1 1
-        _apply_render $canvas $ctx $scale $rx $ry $vw $vh
+        _apply_render $canvas $ctx $scale $rx $ry $vw $vh $exclude_tags
         $ctx save $filename
         $ctx destroy
         return
     }
 
     set ctx [tclmcairo::new $out_w $out_h -mode $mode -file $filename]
-    _apply_render $canvas $ctx $scale $rx $ry $vw $vh
+    _apply_render $canvas $ctx $scale $rx $ry $vw $vh $exclude_tags
     $ctx finish
     $ctx destroy
 }
 
 # Internal: apply scale/viewport transforms then render
-proc _apply_render {canvas ctx scale vx vy {vw 0} {vh 0}} {
+proc _apply_render {canvas ctx scale vx vy {vw 0} {vh 0} {exclude_tags {}}} {
     if {$scale != 1.0 || $vx != 0 || $vy != 0} {
         $ctx push
         if {$scale != 1.0} { $ctx transform -scale $scale $scale }
@@ -153,15 +510,15 @@ proc _apply_render {canvas ctx scale vx vy {vw 0} {vh 0}} {
         if {$vw > 0 && $vh > 0} {
             set clip [list $vx $vy [expr {$vx+$vw}] [expr {$vy+$vh}]]
         }
-        render $canvas $ctx 0 0 $clip
+        render $canvas $ctx 0 0 $clip $exclude_tags
         $ctx pop
     } else {
-        render $canvas $ctx
+        render $canvas $ctx 0 0 "" $exclude_tags
     }
 }
 
 # Internal: export canvas to open channel
-proc _export_chan {canvas chan fmt scale viewport} {
+proc _export_chan {canvas chan fmt scale viewport {exclude_tags {}}} {
     # Determine canvas size
     set w [$canvas cget -width]
     set h [$canvas cget -height]
@@ -203,7 +560,7 @@ proc _export_chan {canvas chan fmt scale viewport} {
     if {$fmt eq "png"} {
         set ctx [tclmcairo::new $out_w $out_h]
         $ctx clear 1 1 1
-        _apply_render $canvas $ctx $scale $rx $ry $vw $vh
+        _apply_render $canvas $ctx $scale $rx $ry $vw $vh $exclude_tags
         $ctx save -chan $chan -format png
         $ctx destroy
         return
@@ -213,7 +570,7 @@ proc _export_chan {canvas chan fmt scale viewport} {
     # vector mode. Write to tmp file then stream to channel.
     set tmpf [file join /tmp _c2c_chan_[pid]_[clock microseconds].$fmt]
     set ctx [tclmcairo::new $out_w $out_h -mode $fmt -file $tmpf]
-    _apply_render $canvas $ctx $scale $rx $ry $vw $vh
+    _apply_render $canvas $ctx $scale $rx $ry $vw $vh $exclude_tags
     $ctx finish
     $ctx destroy
     # Stream tmp file to channel
@@ -224,9 +581,10 @@ proc _export_chan {canvas chan fmt scale viewport} {
     file delete -force $tmpf
 }
 
-proc render {canvas ctx {ox 0} {oy 0} {clip_bbox ""}} {
+proc render {canvas ctx {ox 0} {oy 0} {clip_bbox ""} {exclude_tags {}}} {
     # ox/oy: canvas origin offset (for scroll position or viewport)
     # clip_bbox: optional {x1 y1 x2 y2} in canvas coords to skip items outside
+    # exclude_tags: list of canvas tags; items carrying any of these are skipped
     #
     # Public API also accepts keyword args:
     #   canvas2cairo::render .c $ctx -clip {x1 y1 x2 y2}
@@ -260,7 +618,7 @@ proc render {canvas ctx {ox 0} {oy 0} {clip_bbox ""}} {
 
     # Render all items in Z-order (bottom to top)
     foreach id [$canvas find all] {
-        _render_item $canvas $ctx $id $clip_bbox
+        _render_item $canvas $ctx $id $clip_bbox $exclude_tags
     }
 
     if {$ox != 0 || $oy != 0} {
@@ -272,7 +630,17 @@ proc render {canvas ctx {ox 0} {oy 0} {clip_bbox ""}} {
 # Item rendering dispatch
 # ================================================================
 
-proc _render_item {canvas ctx id {clip_bbox ""}} {
+proc _render_item {canvas ctx id {clip_bbox ""} {exclude_tags {}}} {
+    # Skip items carrying any excluded tag (selection markers, grid lines,
+    # rubber-band overlays etc. that the editor uses for UI but should
+    # not appear in the exported file).
+    if {[llength $exclude_tags]} {
+        if {[catch {set tags [$canvas gettags $id]}] == 0} {
+            foreach t $exclude_tags {
+                if {[lsearch -exact $tags $t] >= 0} return
+            }
+        }
+    }
     # Skip hidden items
     if {[catch {set state [$canvas itemcget $id -state]}] == 0} {
         if {$state eq "hidden"} return

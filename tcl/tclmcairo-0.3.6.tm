@@ -44,7 +44,7 @@
 #
 #   $ctx destroy
 
-package provide tclmcairo 0.3.5
+package provide tclmcairo 0.3.6
 
 namespace eval ::tclmcairo {
     variable _libloaded 0
@@ -203,6 +203,111 @@ proc ::tclmcairo::new {width height args} {
 }
 
 # ================================================================
+# hasFeature — capability probe (no context required)
+# ================================================================
+#
+# Without argument: list of all enabled features.
+# With argument:    1 if the feature is built in, 0 otherwise.
+#
+# Example:
+#   if {[::tclmcairo::hasFeature lunasvg]} {
+#       $ctx svg_file_luna $f 0 0
+#   } else {
+#       $ctx svg_file $f 0 0     ;# nanosvg fallback
+#   }
+#
+# Unknown feature names always return 0 (forward-compatible probing).
+proc ::tclmcairo::hasFeature {args} {
+    return [tclmcairo hasFeature {*}$args]
+}
+
+# ================================================================
+# locate — find tclmcairo / companion modules on disk
+# ================================================================
+#
+# Solves the path-search dance that consumers (labeledit etc.) used to
+# write themselves. Knows the standard install layout that
+# tclmcairo's TEA build produces: $libdir/tcltk/tclmcairoX.Y.Z/
+#
+# Usage:
+#   tclmcairo::locate                 ;# -> install dir of tclmcairo
+#   tclmcairo::locate canvas2cairo    ;# -> path to .tm file or ""
+#   tclmcairo::locate svg2cairo       ;# -> path to .tm file or ""
+#   tclmcairo::locate -all            ;# -> dict {tclmcairo ... canvas2cairo ...}
+#
+# Returns "" when the requested item is not found, not an error,
+# so callers can use it for soft fallback:
+#
+#   set p [tclmcairo::locate canvas2cairo]
+#   if {$p eq ""} { error "canvas2cairo not installed" }
+#
+# After tclmcairo itself is loaded (which is the only way this proc
+# can be reached), we know exactly where the package lives — the
+# information sits in $::auto_path entries and the env variable that
+# pkgIndex.tcl uses.
+proc ::tclmcairo::locate {{what ""}} {
+    if {$what eq "-all"} {
+        return [list \
+            tclmcairo    [::tclmcairo::_locate_self] \
+            canvas2cairo [::tclmcairo::_locate_module canvas2cairo] \
+            svg2cairo    [::tclmcairo::_locate_module svg2cairo] \
+            shape_renderer [::tclmcairo::_locate_module shape_renderer]]
+    }
+    if {$what eq "" || $what eq "tclmcairo"} {
+        return [::tclmcairo::_locate_self]
+    }
+    return [::tclmcairo::_locate_module $what]
+}
+
+# Find tclmcairo's own install directory (the place where libtclmcairo
+# sits). Several strategies tried in order:
+proc ::tclmcairo::_locate_self {} {
+    # 1. The C extension knows where it was loaded from
+    foreach lib [info loaded] {
+        lassign $lib path pkg
+        if {$pkg eq "Tclmcairo" || $pkg eq "tclmcairo"} {
+            return [file dirname $path]
+        }
+    }
+    # 2. Fall back to the env var that pkgIndex.tcl honours
+    if {[info exists ::env(TCLMCAIRO_LIBDIR)]} {
+        set p [file normalize $::env(TCLMCAIRO_LIBDIR)]
+        if {[file isdirectory $p]} { return $p }
+    }
+    # 3. Standard install paths
+    foreach base {
+        /usr/lib/tcltk /usr/local/lib/tcltk /opt/lib/tcltk
+    } {
+        if {![file isdirectory $base]} { continue }
+        foreach d [glob -nocomplain -directory $base "tclmcairo*"] {
+            if {[file isdirectory $d]} { return $d }
+        }
+    }
+    return ""
+}
+
+# Find a companion .tm module (canvas2cairo, svg2cairo, shape_renderer)
+# on tcl::tm::path or in the tclmcairo install directory next to libtclmcairo.
+proc ::tclmcairo::_locate_module {modname} {
+    # Try tcl::tm::path first — that's where 'package require $modname' looks
+    foreach base [tcl::tm::path list] {
+        foreach pat [list "$modname-*.tm" "$modname.tm"] {
+            set hits [glob -nocomplain -directory $base -- $pat]
+            if {[llength $hits]} { return [lindex [lsort -dictionary $hits] end] }
+        }
+    }
+    # Fall back to the tclmcairo install directory (TEA installs siblings here)
+    set self [::tclmcairo::_locate_self]
+    if {$self ne ""} {
+        foreach pat [list "$modname-*.tm" "$modname.tm"] {
+            set hits [glob -nocomplain -directory $self -- $pat]
+            if {[llength $hits]} { return [lindex [lsort -dictionary $hits] end] }
+        }
+    }
+    return ""
+}
+
+# ================================================================
 # New in 0.2
 # ================================================================
 oo::define tclmcairo::context {
@@ -229,6 +334,7 @@ oo::define tclmcairo::context {
     method image_info         {img_id}            { tclmcairo image_info         $_id $img_id }
     method image_scale        {img_id w h}        { tclmcairo image_scale        $_id $img_id $w $h }
     method image_load_surface {src_id}            { tclmcairo image_load_surface $_id $src_id }
+    method image_from_ppm     {bytes x y args}    { tclmcairo image_from_ppm     $_id $bytes $x $y {*}$args }
     method select_font_face {family args}       { tclmcairo select_font_face $_id $family {*}$args }
     method svg_file  {filename x y args}        { tclmcairo svg_file  $_id $filename $x $y {*}$args }
     method svg_data      {svgdata  x y args}    { tclmcairo svg_data      $_id $svgdata  $x $y {*}$args }

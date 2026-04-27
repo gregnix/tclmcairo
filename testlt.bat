@@ -3,7 +3,7 @@ setlocal enabledelayedexpansion
 
 set TCLBIN=C:\Bawt\Bawt86\Windows\x64\Development\opt\Tcl\bin
 set TCLSH=%TCLBIN%\tclsh.exe
-set LIBDIR=C:\Tcl\lib\tclmcairo0.3.4
+set LIBDIR=C:\Tcl\lib\tclmcairo0.3.6
 set PATH=%LIBDIR%;%TCLBIN%;%PATH%
 set TCLMCAIRO_LIBDIR=%LIBDIR%
 

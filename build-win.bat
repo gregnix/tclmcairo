@@ -9,9 +9,9 @@ REM Mit lunasvg (optional):
 REM   set LUNASVG_DIR=C:\msys64\home\greg\src\lunasvg
 REM   build-win.bat
 REM
-REM OUTPUT: dist\tclmcairo0.3.4\  -- bereit zum Installieren nach C:\Tcl\lib\
+REM OUTPUT: dist\tclmcairo0.3.6\  -- bereit zum Installieren nach C:\Tcl\lib\
 
-set VERSION=0.3.4
+set VERSION=0.3.6
 set TCL_VER=%1
 if "%TCL_VER%"=="" set TCL_VER=86
 
